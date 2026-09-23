@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/v4/veilV4*.ts"
+  ],
+  "compilerOptions": {
+    "noEmit": true,
+    "experimentalDecorators": true,
+    "target": "ESNext",
+    "esModuleInterop": true
+  }
+}

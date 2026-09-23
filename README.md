@@ -1,0 +1,218 @@
+# Veil BSV
+
+Veil is a replayable proof of concept for the bounty requirement:
+
+> ZEC-style shielded pool on BSV: notes, nullifiers, shield, private transfer, and unshield, with zero-knowledge verification on-chain.
+
+It includes both the protocol and a deliberately simple wallet UI. A non-developer sees four actions—**Add**, **Send**, **Lock**, and **Withdraw**—while the app generates and verifies a real Groth16 proof in the browser. The technical roots, paths, notes, nullifiers, and private lock heights remain behind the interface.
+
+## Try the UI
+
+Requirements: Node.js 20+ and npm.
+
+```bash
+npm ci
+npm run build:circuit
+npm run dev:ui
+```
+
+Open `http://127.0.0.1:5173`. The first proof downloads a 10 MB proving key; subsequent proofs are typically sub-second on a modern laptop.
+
+The UI is honest about its boundary: it creates and verifies real proofs against local demo state, but does **not** broadcast or spend funds. Wallet connection is read-only. The on-chain transaction path is exercised by the replay commands below.
+
+## One-command bounty replay
+
+From a clean clone with Node.js 20+ and npm:
+
+```bash
+npm ci
+npm run bounty:replay
+```
+
+This compiles the circuit and optimized-v4 staged contracts, runs the local
+shield/private-transfer/unshield demonstration, executes the complete staged
+verifier in the Bitcoin Script interpreter, runs positive and negative tests,
+type-checks the source, and builds the browser UI. It never reads `.private/`,
+contacts a miner, or broadcasts a transaction.
+
+The first clean run creates a fresh development ceremony and is intentionally
+CPU-intensive; `snarkjs powersoftau prepare phase2` may use all available CPU
+cores for several minutes. The fresh key proves independent source replay. The
+same command separately checks the committed deployment verification key
+against the exact v4 contract hashes that were mined on testnet.
+
+For the short circuit-only demonstration, run:
+
+```bash
+npm run demo
+```
+
+Expected result:
+
+```text
+✓ shield            ...
+✓ private transfer  ...
+✓ unshield          ...
+✓ height lock rejected a spend before block 900,000
+✓ tampered statement rejected
+✓ sCrypt verifier accepted the Groth16 proof
+```
+
+Run the historical monolithic BSV locking script itself, including a positive
+unshield and a tampered-proof rejection:
+
+```bash
+npm run build:contract
+npm run test:onchain
+```
+
+On the reference machine the script test reports:
+
+```text
+✓ Bitcoin Script accepted the unshield proof
+✓ Bitcoin Script rejected an all-zero residue witness
+✓ Bitcoin Script rejected the note one block before unlock
+✓ Bitcoin Script rejected a tampered proof
+locking script: 1,097,379 bytes
+```
+
+That command is retained as a regression test. The deployed optimized-v4 path
+is the staged verifier below, not this monolithic contract.
+
+The v4 verifier splits proof checking across seven authenticated transactions.
+The largest generated locking script is 248,381 bytes and the local test
+asserts every unlocking script is also below 500,000 bytes. The complete
+shield, private-transfer, height-lock and mature-unshield sequences have been
+mined on BSV testnet. Public transaction evidence is recorded in
+[`evidence/testnet-v4-lifecycle.json`](evidence/testnet-v4-lifecycle.json).
+
+Run all circuit/state tests and build the UI:
+
+```bash
+npm test
+npm run typecheck
+npm run build:ui
+```
+
+## What is actually proven
+
+Every transition has one public Groth16 signal: a domain-separated SHA-256 hash
+of the complete public transition, reduced to a fixed 248-bit field element.
+The BSV covenant independently serializes the same transition and recomputes
+that hash from its current state and the proposed transaction. MiMC remains in
+the private note, nullifier, and Merkle-tree relations inside the circuit.
+
+```text
+transparent BSV
+      │ shield (public amount)
+      ▼
+┌──────────────────────────────────────────┐
+│ Stateful pool UTXO                       │
+│ noteRoot · nullifierRoot · nextNoteIndex │
+└──────────────────────────────────────────┘
+      │              │
+      │ private send │ unshield (public amount + P2PKH)
+      ▼              ▼
+ new notes       transparent BSV
+```
+
+The circuit enforces:
+
+- `note = MiMC(MiMC(MiMC(amount, ownerKey), lockHeight), rho)`;
+- ownership by knowledge of `ownerKey` and `rho`;
+- block-height maturity without revealing the note's committed lock height;
+- membership of the input note in the append-only note tree;
+- `nullifier = MiMC(note, ownerKey)`;
+- a zero leaf in the nullifier tree before spend, then insertion of that nullifier;
+- proven-empty append positions for new notes;
+- 64-bit amount ranges and exact value conservation;
+- mode rules for shield, private transfer, and unshield;
+- binding of roots, indices, commitments, nullifier, public amounts, and withdrawal recipient into the one public statement.
+
+The contract then enforces:
+
+- the Groth16 BN254 proof inside Bitcoin Script, using prepared constant lines
+  and a checked pairing-residue witness to avoid the full final exponentiation;
+- the proof height against transaction `nLockTime`, with a non-final input sequence;
+- the exact successor state output;
+- `old pool value + publicIn - publicOut`;
+- the exact P2PKH withdrawal output; and
+- retention of a one-satoshi state anchor.
+
+## Requirement coverage
+
+| Requirement | Implementation |
+| --- | --- |
+| Notes | MiMC commitments in an append-only depth-4 Merkle tree |
+| Nullifiers | Public nullifier plus a stateful nullifier Merkle tree; a used slot cannot be spent again |
+| Height locks | Each note privately commits to an absolute BSV block height; spends prove maturity and bind it to transaction `nLockTime` |
+| Shield | Public input becomes one private note and increases the pool UTXO value |
+| Private transfer | One private note becomes a recipient note plus a private change note; no public value crosses the boundary |
+| Unshield | One private note becomes an optional change note plus a bound P2PKH payout |
+| ZK on-chain | Compiled sCrypt covenant calls the BN254 Groth16 verifier and binds transaction outputs |
+| Replayable | Scripted clean build, three-transition CLI replay, negative tests, browser prover, and Script VM test |
+
+## Repository map
+
+- `circuits/shielded_pool.circom` — universal shield/transfer/unshield relation.
+- `src/contracts/shieldedPool.ts` — stateful BSV covenant and on-chain verifier.
+- `src/v4/` — deployed staged pool, preparation, four Miller stages, and finalizer.
+- `src/crypto.ts` — notes, nullifiers, Merkle state, and transition builder.
+- `src/groth16.ts` — snarkjs → sCrypt BN254 conversion.
+- `ui/` — responsive non-developer wallet interface with in-browser proofs.
+- `scripts/demo.ts` — complete proof replay and tamper test.
+- `scripts/verify-onchain.ts` — actual Bitcoin Script execution test.
+- `scripts/test-v4-chain.ts` — complete optimized-v4 staged Script execution and negative tests.
+- `tests/pool.test.ts` — circuit witnesses and double-spend regression tests.
+- `evidence/testnet-v4-lifecycle.json` — sanitized public testnet transaction evidence.
+- `evidence/deployed-verification-key.json` — exact public verification key used by the mined deployment.
+- `evidence/deployed-v4-chain-manifest.json` — exact deployed contract sizes and code-part hashes.
+
+## Block-height locks
+
+Every note has a private `lockHeight` committed into its note hash. A value of
+zero means immediately spendable. To spend a locked note, the owner supplies a
+public `currentHeight`; the Groth16 circuit proves privately that:
+
+```text
+input note lockHeight <= currentHeight
+```
+
+The covenant then requires a block-height `nLockTime >= currentHeight` and a
+non-final input sequence. Bitcoin therefore cannot mine the transaction before
+the note is mature. Lock heights must be below `500,000,000`, keeping them in
+Bitcoin's block-height namespace rather than its timestamp namespace.
+
+In the UI, choose **Lock**, enter an amount, and select an unlock block. Locked
+coins are shown separately from the spendable private balance.
+
+## Current scope
+
+This is bounty-grade, auditable proof-of-concept code—not production money software:
+
+- The tree is intentionally depth 4 (16 notes) so anyone can replay it quickly. Increase `TREE_DEPTH` and the circuit depth together for a larger pool.
+- The join-split is 1-in/1-or-2-out. Production wallets need note selection and multi-input aggregation.
+- The scripted single-contributor ceremony is **development only** and gives no production toxic-waste protection. A real deployment must use a multi-party ceremony or a different proving system.
+- Proof verification uses a seven-transaction authenticated pipeline. This
+  improves miner-policy compatibility at the cost of latency, fees, and
+  intermediate state. Production submission should send the dependency chain
+  parent-first and reconcile every TXID on an uncertain response.
+- Notes are not yet encrypted for recipient discovery; the demo assumes note plaintext is delivered out of band.
+- No security audit has been performed. Do not use real funds.
+
+See [SECURITY.md](SECURITY.md) before extending or deploying the protocol.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for supported demo computers and the
+recommended presentation setup.
+See [PROVENANCE.md](PROVENANCE.md) for the independent-work boundary, public
+dependencies, and release provenance record.
+See [BOUNTY_COMPLIANCE.md](BOUNTY_COMPLIANCE.md) for the bounty-condition
+mapping and public testnet evidence.
+See [TESTNET_DEPLOYMENT.md](TESTNET_DEPLOYMENT.md) for the Tor-only v4
+deployment and lifecycle controls.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency notices.
+
+## License
+
+MIT for original project source. Dependencies retain their own licenses;
+notably snarkjs/circomlib are GPL-3.0. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

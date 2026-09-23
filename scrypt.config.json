@@ -1,0 +1,4 @@
+{
+  "project": "./tsconfig.json",
+  "artifacts": "./artifacts"
+}

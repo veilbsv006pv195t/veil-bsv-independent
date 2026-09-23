@@ -1,0 +1,91 @@
+{
+  "format": "veil-v4-public-testnet-evidence-v1",
+  "network": "bsv-testnet",
+  "privacy": "sanitized-public-chain-facts-only",
+  "deployment": {
+    "txid": "863e779bd93de9ed6a661d45352bb315f30430194878f934f738c86de727571c",
+    "blockHeight": 1759583,
+    "blockHash": "0000000056843faebf64e808dbb116a5b87cbf4883a7ad0a16086481abc72f8f",
+    "explorerUrl": "https://test.whatsonchain.com/tx/863e779bd93de9ed6a661d45352bb315f30430194878f934f738c86de727571c"
+  },
+  "shield": {
+    "chain": [
+      "267d9dea4b0fd37ecf26a63b76147b46bb2453e2255454c5aa5c579d4c58762a",
+      "ec41557c9248df595f0a66e4154faf4aa0b5f07d52028bbfdc2c1acc2d7cd2b7",
+      "7fb74545a14ca8057c35eff38c57bb943536cd2500062054cbc32174ebf77b33",
+      "a328498caa24fc16377496e81a743373d93043dd2823752b19587dd1cb4d1228",
+      "5cdf4ee1bb6e5cefc089a2da2a5d43c08d1f3e7a98562a021e29aff3f547e9af",
+      "446033009d36a98f2f0d3d67e9be1e340cbd7890933258efe39cad592a1187c7",
+      "6203bf836822b7d69e5913498588b40b58d9588f753b8fdfc7c836af1086fc57",
+      "414888dd287a963e4a41d93678624386aab82668ee91dda13429e5a828883d5a"
+    ],
+    "finalizer": {
+      "txid": "414888dd287a963e4a41d93678624386aab82668ee91dda13429e5a828883d5a",
+      "blockHeight": 1759599,
+      "blockHash": "00000000003aa1c7c7e38ba2fb0ef1b8b3065a5476edc7953124e2f4bdb1387d",
+      "poolSatoshis": 100001,
+      "explorerUrl": "https://test.whatsonchain.com/tx/414888dd287a963e4a41d93678624386aab82668ee91dda13429e5a828883d5a"
+    }
+  },
+  "privateTransfer": {
+    "chain": [
+      "f69f2077f171f4e7ef2dc1830383646b8aea81d81966017850993fa00b26e14c",
+      "f576dd49c34c133a2a55cc12cb280ce5dbb6d3c283facfc9925a8552d569c602",
+      "01397c14f57ba1232626dc7f88e6d421a37f822a935ec9ee27539c90f6c1707e",
+      "87063aa5d6a8f7b0395cb28f874089c5510da54caa465b70fe7aa2a80f22a545",
+      "7c0e8a9cbcfc71d2debe841f2acef9ea969f420c33ff0a0d1736c4c33eb861d3",
+      "695a08412b532f48ad10149cfc24273a83fa20a2523077f96a80add7fefd46e5",
+      "b2a754b06449f5ac46e53c9cf2705895e2378e2980c96e194db88193838d217c",
+      "0ae512157ae200336db644694f5de0ff65bcfd47577a2cfedb7dcc1323bc705b"
+    ],
+    "finalizer": {
+      "txid": "0ae512157ae200336db644694f5de0ff65bcfd47577a2cfedb7dcc1323bc705b",
+      "blockHeight": 1759623,
+      "blockHash": "00000000805eb41a6c0ba337419b72cb073c38332dedf5dc8baa1ebe80eea687",
+      "explorerUrl": "https://test.whatsonchain.com/tx/0ae512157ae200336db644694f5de0ff65bcfd47577a2cfedb7dcc1323bc705b"
+    }
+  },
+  "shieldedHeightLock": {
+    "lockedShieldFinalizer": {
+      "txid": "6d3e90da8473cb57100bd7acb5d351e468182dfe84fc6cff6c804c7d551c341f",
+      "blockHeight": 1759629,
+      "explorerUrl": "https://test.whatsonchain.com/tx/6d3e90da8473cb57100bd7acb5d351e468182dfe84fc6cff6c804c7d551c341f"
+    },
+    "unshieldBegin": {
+      "txid": "7fdce02d73f8099fdceb032b62946298c57111daecf37017f68995a15ae70607",
+      "submittedAtObservedTip": 1759629,
+      "nLockTime": 1759649,
+      "preMaturityArcStatus": "SEEN_ON_NETWORK",
+      "minedBlockHeight": 1759651,
+      "minedBlockHash": "0000000000ac12f3740b5760502818b3f73529532ecab945a7044b1d9d575c85",
+      "prematureMiningObserved": false,
+      "explorerUrl": "https://test.whatsonchain.com/tx/7fdce02d73f8099fdceb032b62946298c57111daecf37017f68995a15ae70607"
+    },
+    "matureUnshieldChain": [
+      "08ea2242b0bef2d08c42d0d8a2714bf703d5924a3d6a1d32b9af83e37cc182f9",
+      "7fdce02d73f8099fdceb032b62946298c57111daecf37017f68995a15ae70607",
+      "5d267c1a98e13cff1d1378c9b9c43eaed2069517c72430ff3075a2eebff9fab6",
+      "efff6acb98259f99ccf967489c21be58d21a47146e5bdcfce535f177bd284c17",
+      "4191ae0de3b95ec5160045a4dff225927cab6fbd4405d20fe334595958b0a2c3",
+      "2750c6137c10b41bb7ba9fea374f48c2c99535cf8108be732044f49816efbb83",
+      "4f76293e32dc878543b8c6bce736718a7f01f8812838134a7bcdfaf822737a9f",
+      "4d59d335d18398e3abb7699602d6be62a893cec383a0ed4cbca4b3e6fff6e828"
+    ],
+    "finalizer": {
+      "txid": "4d59d335d18398e3abb7699602d6be62a893cec383a0ed4cbca4b3e6fff6e828",
+      "blockHeight": 1759654,
+      "blockHash": "0000000000d4e16cf0611cc6309754ebea746806dc740cfefe3db1a2539f3434",
+      "recipientSatoshis": 10000,
+      "poolSatoshis": 100001,
+      "merkleInclusionEvidenceAvailable": true,
+      "explorerUrl": "https://test.whatsonchain.com/tx/4d59d335d18398e3abb7699602d6be62a893cec383a0ed4cbca4b3e6fff6e828"
+    }
+  },
+  "excluded": [
+    "private keys",
+    "note secrets",
+    "raw transaction bytes",
+    "wallet or recovery credentials",
+    "private service responses"
+  ]
+}

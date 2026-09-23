@@ -1,0 +1,47 @@
+{
+  "format": "veil-v4-deployed-verifier-manifest-v1",
+  "network": "bsv-testnet",
+  "canonicalVerificationKeySha256": "b4502a5746a628da94d5f46db3877d8979cb3c3bb95eb646317a2880d9a763b5",
+  "provingArtifacts": {
+    "shielded_pool_final.zkeySha256": "c3c56072a706e8489272248352a130b20c80ec6ee63fbc06211f0bc5438414ba",
+    "shielded_pool.wasmSha256": "7de9771dc82cd849234d85fc4b52d6359d69469f18d0acc0cf887258782f2a18"
+  },
+  "policyTargetBytes": 500000,
+  "contracts": {
+    "pool": {
+      "lockingScriptBytes": 12334,
+      "codePartBytes": 12322,
+      "codePartHash256": "2621ee8bdc29129974774c2ff42ca4a0639bab635a0f881dea07d4aa6c69c107"
+    },
+    "preparation": {
+      "lockingScriptBytes": 248381,
+      "codePartBytes": 248342,
+      "codePartHash256": "983fb1aa01ae9f74ea762dad94fbb8ac5489da1284a3c857d3df853acc76ba8c"
+    },
+    "stage0": {
+      "lockingScriptBytes": 234270,
+      "codePartBytes": 234231,
+      "codePartHash256": "47a21519b2b42565bcd95247888d6494c02fb90c54a24147e65bb7db2ec31ef2"
+    },
+    "stage1": {
+      "lockingScriptBytes": 215583,
+      "codePartBytes": 215544,
+      "codePartHash256": "f6f05606a2b644bf15d6d7d0118aeec4f4fdd9306aa9571d83f3d14107369080"
+    },
+    "stage2": {
+      "lockingScriptBytes": 234271,
+      "codePartBytes": 234232,
+      "codePartHash256": "e25650b8f48a12df7cdf5ee6b29f6fe554f1f5f4880890c0b536081697fc680e"
+    },
+    "stage3": {
+      "lockingScriptBytes": 224936,
+      "codePartBytes": 224897,
+      "codePartHash256": "015ab2bd57a6fbc6d118583d9b3a4aefe35f9579a49c1dafebc91b7f5ede4123"
+    },
+    "finalizer": {
+      "lockingScriptBytes": 70826,
+      "codePartBytes": 70787,
+      "codePartHash256": "7785169e2cc6658d9afd41039ba42be2f7cf0af294a62c2ea4e4546979c55bb4"
+    }
+  }
+}
