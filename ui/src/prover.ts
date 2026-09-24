@@ -8,7 +8,9 @@ export interface ProofResult {
     elapsedMs: number
 }
 
-const hashPromise: Promise<HashFn> = fetch('/zk/mimc_constants.json')
+const proofAsset = (name: string): string => `${import.meta.env.BASE_URL}zk/${name}`
+
+const hashPromise: Promise<HashFn> = fetch(proofAsset('mimc_constants.json'))
     .then((response) => {
         if (!response.ok) throw new Error('MiMC parameters are unavailable')
         return response.json() as Promise<string[]>
@@ -32,7 +34,7 @@ const hashPromise: Promise<HashFn> = fetch('/zk/mimc_constants.json')
 let verificationKeyPromise: Promise<unknown> | undefined
 
 function verificationKey(): Promise<unknown> {
-    verificationKeyPromise ??= fetch('/zk/verification_key.json').then((response) => {
+    verificationKeyPromise ??= fetch(proofAsset('verification_key.json')).then((response) => {
         if (!response.ok) throw new Error('verification key is unavailable')
         return response.json()
     })
@@ -129,8 +131,8 @@ export async function proveAction(
     const started = performance.now()
     const { proof, publicSignals } = await groth16.fullProve(
         transition.circuitInput,
-        '/zk/shielded_pool.wasm',
-        '/zk/shielded_pool_final.zkey'
+        proofAsset('shielded_pool.wasm'),
+        proofAsset('shielded_pool_final.zkey')
     )
     if (!(await groth16.verify(await verificationKey(), publicSignals, proof))) {
         throw new Error('The generated zero-knowledge proof did not verify')
