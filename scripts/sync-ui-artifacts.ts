@@ -13,9 +13,25 @@ for (const [source, name] of [
 ] as const) {
     copyFileSync(path.join(root, source), path.join(destination, name))
 }
+const contractDestination = path.join(destination, 'contracts')
+mkdirSync(contractDestination, { recursive: true })
+for (const name of [
+    'shieldedPoolV4',
+    'veilV4Preparation',
+    'veilV4Miller0',
+    'veilV4Miller1',
+    'veilV4Miller2',
+    'veilV4Miller3',
+    'veilV4Finalizer',
+] as const) {
+    copyFileSync(
+        path.join(root, 'artifacts', 'src', 'v4', `${name}.json`),
+        path.join(contractDestination, `${name}.json`)
+    )
+}
 writeFileSync(
     path.join(destination, 'mimc_constants.json'),
     JSON.stringify(Mimc7.CONSTS.map((value) => value.toString()))
 )
 
-console.log('Synced Groth16 browser artifacts to ui/public/zk/.')
+console.log('Synced Groth16 and v4 contract browser artifacts to ui/public/zk/.')

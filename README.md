@@ -11,9 +11,12 @@ hosted website, wallet, testnet coins, or blockchain connection.
 **Live static demo:**
 [`veilbsv006pv195t.github.io/veil-bsv-independent`](https://veilbsv006pv195t.github.io/veil-bsv-independent/)
 
-The site has no Veil backend and never receives private inputs. Proof generation
-and verification run in the visitor's browser against local demo state. The
-public repository replay and mined testnet evidence remain the authoritative
+The site has no Veil backend and never receives private inputs. Its default
+mode generates and verifies proofs in the visitor's browser against local demo
+state. An optional reviewer mode can unlock a disposable, testnet-only wallet
+in the browser and prepare real testnet transactions, but it is disabled unless
+an encrypted wallet envelope is deliberately included in the site. The public
+repository replay and mined testnet evidence remain the authoritative
 implementation evidence.
 
 ## One-command bounty replay
@@ -48,8 +51,8 @@ and the exact success criteria.
 ## Optional local wallet UI
 
 The UI is supplementary and is not required to satisfy or replay the bounty.
-It creates and verifies real proofs against local demo state, but does **not**
-broadcast or spend funds. Developers can run it locally with:
+Its normal mode creates and verifies real proofs against local demo state but
+does **not** broadcast or spend funds. Developers can run it locally with:
 
 ```bash
 npm run build:circuit
@@ -59,6 +62,54 @@ npm run dev:ui
 Then open `http://127.0.0.1:5173`. This temporary local development process is
 only a file preview for the optional UI; it is not a Veil server or part of the
 bounty replay.
+
+### Optional password-unlocked testnet reviewer mode
+
+The static UI can also prepare and submit the real v4 staged transaction chain
+without a Veil server. This mode is intentionally limited to a disposable
+testnet wallet. Put its unencrypted record in the ignored file
+`.private/live-demo-wallet.json`:
+
+```json
+{
+  "network": "testnet",
+  "address": "testnet address",
+  "wif": "matching testnet WIF",
+  "funding": {
+    "txid": "confirmed funding transaction ID",
+    "vout": 0,
+    "satoshis": 10000000
+  }
+}
+```
+
+Then run `npm run live-wallet:encrypt` interactively. The command requires a
+password of at least 24 characters and writes only an AES-256-GCM envelope to
+`ui/public/live-wallet/encrypted-wallet.json`; it never prints the password or
+WIF. The address and funding outpoint remain public so the static page does not
+depend on an address-indexing API. Deliver the password separately from the site
+URL.
+
+After unlock, the reviewer chooses the action and amount. The browser generates
+the Groth16 proof, constructs and signs the deployment/funding/verifier chain,
+runs the Bitcoin Script interpreter against every covenant and sponsor input,
+and shows the exact action, recipient, miner fees, and TXIDs. Nothing is sent
+until the reviewer checks the confirmation box and clicks the separate
+**Broadcast exact testnet chain** button. Submission is parent-first to ARC;
+network height, policy, and submission status are read directly from public
+testnet APIs, while the confirmed starting outpoint is bound into the envelope.
+
+Keep the tab open for the whole reviewer session. Private note state is
+deliberately kept in memory rather than persisted by the public site; reloading
+after a broadcast retires that one-session reviewer wallet flow.
+
+The password is not a spending policy. Anyone who knows it can recover the
+disposable WIF from browser memory and control all of that wallet's testnet
+coins. Retire the password and remove the encrypted envelope after review.
+Never use this mode with mainnet funds. The current **Send** action demonstrates
+a private nullifier-and-new-note transfer back to a fresh note controlled by the
+same disposable reviewer wallet; interoperable recipient note delivery remains
+out of scope, as documented below.
 
 ## Independent live testnet operator
 
@@ -80,9 +131,10 @@ A full deployment plus shield, transfer, lock, and unshield rehearsal should
 start with at least 2,100,000 testnet satoshis for the current scripted fee
 budget and headroom.
 
-The live path remains intentionally controlled: prepare locally, audit exact
-bytes, approve the displayed TXID or manifest hash, then submit parent-first
-through Tor. It is not driven by the browser UI. See
+The command-line live path remains intentionally controlled: prepare locally,
+audit exact bytes, approve the displayed TXID or manifest hash, then submit
+parent-first through Tor. The optional reviewer mode above provides the same
+prepare/review/submit boundary in a static browser UI. See
 [`TESTNET_DEPLOYMENT.md`](TESTNET_DEPLOYMENT.md) for the complete operator
 runbook. A pre-funded demonstration wallet may be handed to a reviewer through
 a private channel, but its key must never be committed, attached to a release,

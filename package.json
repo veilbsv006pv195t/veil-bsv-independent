@@ -18,6 +18,7 @@
     "release:package": "bash scripts/package-release.sh",
     "release:package-deployed-artifacts": "bash scripts/package-deployed-artifacts.sh",
     "sync:ui-artifacts": "node --import tsx scripts/sync-ui-artifacts.ts",
+    "live-wallet:encrypt": "node --import tsx scripts/encrypt-live-wallet.ts",
     "dev:ui": "npm run sync:ui-artifacts && vite --config ui/vite.config.ts",
     "build:ui": "npm run sync:ui-artifacts && vite build --config ui/vite.config.ts",
     "demo": "node --import tsx scripts/demo.ts",
@@ -83,6 +84,7 @@
     "ts-patch": "3.0.1",
     "tsx": "4.20.5",
     "typescript": "5.3.3",
-    "vite": "7.1.5"
+    "vite": "7.1.5",
+    "vite-plugin-node-polyfills": "^0.24.0"
   }
 }

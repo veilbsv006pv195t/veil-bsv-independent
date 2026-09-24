@@ -133,6 +133,37 @@ footer a { color: var(--green); text-decoration: none; font-weight: 700; }
 .toast { position: fixed; left: 50%; bottom: 24px; z-index: 10; transform: translate(-50%, 20px); padding: 12px 17px; border-radius: 11px; color: white; background: #17211b; box-shadow: 0 10px 30px rgba(0,0,0,.2); font-size: 12px; font-weight: 650; opacity: 0; pointer-events: none; transition: .22s; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 22px; background: rgba(10,18,14,.72); backdrop-filter: blur(7px); }
+.live-modal { position: relative; width: min(100%, 560px); max-height: calc(100vh - 44px); overflow: auto; border: 1px solid rgba(23,33,27,.12); border-radius: 22px; padding: 31px; background: #fbfcf9; box-shadow: 0 28px 90px rgba(0,0,0,.3); }
+.review-modal { width: min(100%, 720px); }
+.modal-close { position: absolute; top: 15px; right: 16px; width: 33px; height: 33px; border: 0; border-radius: 50%; color: #657068; background: #edf0eb; font-size: 23px; line-height: 1; }
+.live-kicker { color: var(--green-2); font-size: 9px; font-weight: 850; letter-spacing: .11em; }
+.live-modal h2 { margin: 9px 0 10px; font-family: Georgia, serif; font-size: 30px; font-weight: 500; letter-spacing: -.025em; }
+.live-modal > p { margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.live-modal .primary-button { margin-top: 17px; }
+.secondary-button { width: 100%; min-height: 43px; margin-top: 9px; border: 1px solid #d8ded7; border-radius: 11px; color: var(--green); background: transparent; font-size: 12px; font-weight: 750; }
+.unlocked-address { margin: 20px 0 4px; padding: 14px 15px; border: 1px solid #d8ded7; border-radius: 12px; background: white; }
+.unlocked-address span, .review-summary span { display: block; margin-bottom: 4px; color: #89918b; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; }
+.unlocked-address strong { display: block; overflow-wrap: anywhere; font-size: 12px; }
+.review-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; margin: 20px 0; }
+.review-summary > div { padding: 11px 12px; border: 1px solid #dde2dc; border-radius: 10px; background: white; }
+.review-summary .wide { grid-column: 1 / -1; }
+.review-summary strong { display: block; overflow-wrap: anywhere; font-size: 12px; }
+.tx-review-list { max-height: 285px; overflow: auto; margin: 0; padding: 0; border: 1px solid #dde2dc; border-radius: 12px; background: white; list-style: none; }
+.tx-review-list li { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #e8ebe6; }
+.tx-review-list li:last-child { border-bottom: 0; }
+.tx-review-list li.active { background: #eaf7ef; box-shadow: inset 3px 0 var(--green-2); }
+.tx-review-list li div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tx-review-list li span { font-size: 11px; font-weight: 750; }
+.tx-review-list li small { color: #89918b; font-size: 9px; }
+.tx-review-list a { color: var(--green); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; text-decoration: none; }
+.review-warning { margin: 13px 0 !important; padding: 10px 11px; border-radius: 9px; color: #6c5325 !important; background: #fff7e4; }
+.live-confirm { display: grid; grid-template-columns: auto 1fr; gap: 9px; align-items: start; color: #525d55; font-size: 10px; line-height: 1.45; }
+.live-confirm input { margin-top: 2px; accent-color: var(--green); }
+.danger-button { background: #143c2d; }
+.live-error { margin: 13px 0 0 !important; padding: 10px 11px; border-radius: 9px; color: #902c2c !important; background: #fdecec; }
+.live-safety { margin: 16px 0 0 !important; color: #89918b !important; font-size: 9px !important; text-align: center; }
+
 @media (max-width: 760px) {
   .shell { width: min(100% - 24px, 620px); }
   .topbar { height: 72px; }
@@ -156,4 +187,8 @@ footer a { color: var(--green); text-decoration: none; font-weight: 700; }
   .action-tab { padding-inline: 5px; }
   .activity-row { grid-template-columns: auto 1fr auto; }
   .activity-arrow { display: none; }
+  .modal-backdrop { padding: 10px; }
+  .live-modal { max-height: calc(100vh - 20px); padding: 25px 19px 20px; border-radius: 17px; }
+  .live-modal h2 { font-size: 25px; }
+  .tx-review-list li { grid-template-columns: 1fr; gap: 5px; }
 }

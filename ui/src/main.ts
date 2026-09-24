@@ -1,5 +1,8 @@
 import './styles.css'
 import { proveAction } from './prover'
+import type { LiveVeilSession, PreparedLiveAction } from './live-builder'
+import { broadcastRawTransaction, explorerUrl, testnetHeight } from './live-network'
+import { unlockLiveWallet } from './live-wallet'
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
 
@@ -38,6 +41,14 @@ const state = {
     publicBalance: 25_400,
     currentHeight: 910_000,
     connected: false,
+    liveSession: null as LiveVeilSession | null,
+    liveAddress: '',
+    liveDialogOpen: false,
+    liveUnlocking: false,
+    liveConfirm: false,
+    liveError: '',
+    pendingLivePlan: null as PreparedLiveAction | null,
+    liveBroadcastIndex: -1,
     demoRunning: false,
     busy: false,
     proofProgress: 0,
@@ -103,6 +114,11 @@ function shortProof(signal: string): string {
 function render(): void {
     const active = copy[state.action]
     const max = state.action === 'shield' ? state.publicBalance : state.privateBalance
+    const live = state.liveSession !== null
+    const needsRecipient = active.recipient && !(live && state.action === 'send')
+    const actionDescription = live && state.action === 'send'
+        ? 'Moves value through a nullifier into a fresh private note controlled by this disposable testnet wallet.'
+        : active.description
     document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <div class="shell">
         <header class="topbar">
@@ -112,10 +128,14 @@ function render(): void {
           </a>
           <div class="header-actions">
             <button class="network" data-run-demo ${state.demoRunning || state.busy ? 'disabled' : ''}>
-              <i></i> ${state.demoRunning ? 'Running demo…' : 'Run testnet demo'}
+              <i></i> ${state.demoRunning ? 'Running demo…' : 'Run local proof demo'}
             </button>
             <button class="wallet-button" id="connect-wallet">
-              ${state.connected ? '<span class="wallet-dot"></span> Wallet connected' : 'Connect wallet'}
+              ${live
+                  ? '<span class="wallet-dot"></span> Live testnet unlocked'
+                  : state.connected
+                    ? '<span class="wallet-dot"></span> Wallet connected'
+                    : 'Unlock live testnet'}
             </button>
           </div>
         </header>
@@ -165,10 +185,10 @@ function render(): void {
               <div class="form-copy">
                 <span>${active.eyebrow}</span>
                 <h2>${active.title}</h2>
-                <p>${active.description}</p>
+                <p>${actionDescription}</p>
               </div>
 
-              ${active.recipient ? `
+              ${needsRecipient ? `
                 <label class="field-label" for="recipient">${active.recipientLabel}</label>
                 <div class="text-field">
                   <input id="recipient" autocomplete="off" spellcheck="false" placeholder="${active.recipientPlaceholder}" value="${escapeHtml(state.recipient)}" />
@@ -195,7 +215,11 @@ function render(): void {
               ` : ''}
 
               <button class="primary-button" id="submit-action" ${state.busy ? 'disabled' : ''}>
-                ${state.busy ? '<span class="spinner"></span> Creating private proof…' : `${active.cta} <span>→</span>`}
+                ${state.busy
+                    ? '<span class="spinner"></span> Preparing audited transaction chain…'
+                    : live
+                      ? `Prepare ${active.cta.toLowerCase()} <span>→</span>`
+                      : `${active.cta} <span>→</span>`}
               </button>
               ${state.busy ? `
                 <div class="proof-progress" role="progressbar" aria-valuemin="1" aria-valuemax="100" aria-valuenow="${state.proofProgress}">
@@ -203,7 +227,9 @@ function render(): void {
                   <div class="proof-progress-copy"><span id="proof-progress-label">${state.proofProgressLabel}</span><strong id="proof-progress-percent">${state.proofProgress}%</strong></div>
                 </div>
               ` : ''}
-              <div class="trust-line">${icons.lock}<span>Keys stay in your wallet. Proofs reveal no private details.</span></div>
+              <div class="trust-line">${icons.lock}<span>${live
+                  ? 'Key stays in this tab. Nothing broadcasts before exact TXID review.'
+                  : 'Keys stay in your wallet. Proofs reveal no private details.'}</span></div>
             </section>
           </section>
 
@@ -215,11 +241,70 @@ function render(): void {
           </section>
         </main>
 
-        <footer><span>Real proofs, local demo state. No transaction is broadcast.</span><span>Source included with release</span></footer>
+        <footer><span>${live
+            ? 'LIVE TESTNET MODE · Every signed transaction requires review before broadcast.'
+            : 'Real proofs, local demo state. No transaction is broadcast.'}</span><span>Source included with release</span></footer>
         <div class="toast" id="toast" role="status"></div>
       </div>
+      ${state.liveDialogOpen || state.pendingLivePlan ? liveDialog() : ''}
     `
     wireEvents()
+}
+
+function liveDialog(): string {
+    const plan = state.pendingLivePlan
+    if (plan) {
+        const submissionStarted = state.liveBroadcastIndex >= 0
+        return `<div class="modal-backdrop" id="live-modal-backdrop">
+          <section class="live-modal review-modal" role="dialog" aria-modal="true" aria-labelledby="live-title">
+            <button class="modal-close" id="close-live-modal" aria-label="Close" ${state.busy || submissionStarted ? 'disabled' : ''}>×</button>
+            <span class="live-kicker">SIGNED LOCALLY · NOT BROADCAST</span>
+            <h2 id="live-title">Review the exact testnet chain</h2>
+            <div class="review-summary">
+              <div><span>Action</span><strong>${escapeHtml(plan.action)}</strong></div>
+              <div><span>Amount</span><strong>${formatSats(plan.amount)} sats</strong></div>
+              <div><span>Total miner fees</span><strong>${formatSats(plan.totalFees)} sats</strong></div>
+              <div><span>Transactions</span><strong>${plan.transactions.length}</strong></div>
+              ${plan.recipient ? `<div class="wide"><span>Public recipient</span><strong>${escapeHtml(plan.recipient)}</strong></div>` : ''}
+              ${plan.unlockHeight ? `<div class="wide"><span>Unlock height</span><strong>${formatSats(plan.unlockHeight)}</strong></div>` : ''}
+            </div>
+            <ol class="tx-review-list">
+              ${plan.transactions.map((tx, index) => `<li class="${state.liveBroadcastIndex === index ? 'active' : ''}">
+                <div><span>${index + 1}. ${escapeHtml(tx.name)}</span><small>${formatSats(tx.bytes)} B · ${formatSats(tx.feeSatoshis)} sat fee</small></div>
+                <a href="${explorerUrl(tx.txid)}" target="_blank" rel="noreferrer">${tx.txid.slice(0, 12)}…${tx.txid.slice(-10)}</a>
+              </li>`).join('')}
+            </ol>
+            <p class="review-warning">${escapeHtml(plan.warning)}</p>
+            <label class="live-confirm"><input id="live-confirm" type="checkbox" ${state.liveConfirm ? 'checked' : ''} ${state.busy ? 'disabled' : ''}/><span>I checked the action, amount, recipient, fees, and TXIDs. Broadcast this exact parent-first chain on BSV testnet.</span></label>
+            <button class="primary-button danger-button" id="broadcast-live-plan" ${!state.liveConfirm || state.busy ? 'disabled' : ''}>
+              ${state.busy ? '<span class="spinner"></span> Broadcasting exact chain…' : 'Broadcast exact testnet chain →'}
+            </button>
+            ${state.liveError ? `<p class="live-error" role="alert">${escapeHtml(state.liveError)}${submissionStarted ? ' Keep this page open and retry the same chain; accepted ancestors will not be resent.' : ''}</p>` : ''}
+          </section>
+        </div>`
+    }
+    return `<div class="modal-backdrop" id="live-modal-backdrop">
+      <section class="live-modal" role="dialog" aria-modal="true" aria-labelledby="live-title">
+        <button class="modal-close" id="close-live-modal" aria-label="Close">×</button>
+        <span class="live-kicker">DISPOSABLE WALLET · TESTNET ONLY</span>
+        <h2 id="live-title">${state.liveSession ? 'Live wallet unlocked' : 'Unlock the live testnet wallet'}</h2>
+        ${state.liveSession ? `
+          <p>The key and private note state exist only in this browser tab. Keep it open for the complete review. Choose any action and amount, then review every exact TXID before broadcasting.</p>
+          <div class="unlocked-address"><span>Testnet address</span><strong>${escapeHtml(state.liveAddress)}</strong></div>
+          <button class="primary-button" id="use-live-wallet">Choose an action →</button>
+          <button class="secondary-button" id="lock-live-wallet">Lock and clear wallet</button>
+        ` : `
+          <p>The separately delivered password decrypts the disposable wallet locally. It is never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
+          <label class="field-label" for="live-password">Live-wallet password</label>
+          <div class="text-field"><input id="live-password" type="password" autocomplete="current-password" spellcheck="false" /></div>
+          <button class="primary-button" id="unlock-live-wallet" ${state.liveUnlocking ? 'disabled' : ''}>
+            ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : 'Unlock in this browser →'}
+          </button>
+        `}
+        ${state.liveError ? `<p class="live-error" role="alert">${escapeHtml(state.liveError)}</p>` : ''}
+        <p class="live-safety">Anyone with the password controls this disposable testnet wallet. Never use this mode with mainnet funds.</p>
+      </section>
+    </div>`
 }
 
 function tab(action: Action, label: string, icon: string): string {
@@ -261,6 +346,12 @@ function updateProofProgress(percent: number, label: string): void {
 }
 
 async function connectWallet(): Promise<void> {
+    if (state.liveSession) {
+        state.liveDialogOpen = true
+        state.liveError = ''
+        render()
+        return
+    }
     if (window.bsv?.getStatus) {
         try {
             const status = await window.bsv.getStatus()
@@ -277,7 +368,150 @@ async function connectWallet(): Promise<void> {
             return
         }
     }
-    showToast('No BSV wallet found — staying in safe demo mode')
+    state.liveDialogOpen = true
+    state.liveError = ''
+    render()
+}
+
+async function unlockBrowserWallet(): Promise<void> {
+    const input = document.querySelector<HTMLInputElement>('#live-password')
+    let password = input?.value ?? ''
+    if (input) input.value = ''
+    state.liveUnlocking = true
+    state.liveError = ''
+    render()
+    try {
+        const wallet = await unlockLiveWallet(password)
+        password = ''
+        const { LiveVeilSession } = await import('./live-builder')
+        const session = await LiveVeilSession.create(wallet, updateProofProgress)
+        const height = await testnetHeight()
+        state.liveSession = session
+        state.liveAddress = wallet.address
+        state.connected = true
+        state.publicBalance = wallet.funding.satoshis
+        state.privateBalance = 0
+        state.lockedBalance = 0
+        state.currentHeight = height
+        state.activities = []
+    } catch (error) {
+        password = ''
+        state.liveError = error instanceof Error ? error.message : 'Could not unlock the live wallet'
+    } finally {
+        state.liveUnlocking = false
+        state.proofProgress = 0
+        state.proofProgressLabel = ''
+        render()
+    }
+}
+
+function clearLiveWallet(): void {
+    state.liveSession = null
+    state.liveAddress = ''
+    state.connected = false
+    state.liveDialogOpen = false
+    state.pendingLivePlan = null
+    state.liveConfirm = false
+    state.liveError = ''
+    state.liveBroadcastIndex = -1
+    resetDemoState()
+    render()
+    showToast('Live wallet key cleared from this tab')
+}
+
+async function prepareLiveAction(amount: number, unlockHeight: number): Promise<boolean> {
+    const session = state.liveSession
+    if (!session) return false
+    state.busy = true
+    state.liveError = ''
+    state.proofProgress = 1
+    state.proofProgressLabel = 'Preparing exact testnet transaction chain'
+    render()
+    try {
+        const plan = await session.prepare(
+            state.action,
+            amount,
+            state.recipient.trim(),
+            unlockHeight,
+            updateProofProgress
+        )
+        state.pendingLivePlan = plan
+        state.liveConfirm = false
+        state.liveDialogOpen = false
+        state.currentHeight = plan.startHeight
+        state.busy = false
+        state.proofProgress = 0
+        state.proofProgressLabel = ''
+        render()
+        return true
+    } catch (error) {
+        state.busy = false
+        state.proofProgress = 0
+        state.proofProgressLabel = ''
+        state.liveError = error instanceof Error ? error.message : 'Could not prepare the live transaction chain'
+        render()
+        showToast(state.liveError)
+        return false
+    }
+}
+
+async function broadcastLivePlan(): Promise<void> {
+    const plan = state.pendingLivePlan
+    const session = state.liveSession
+    if (!plan || !session || !state.liveConfirm || state.busy) return
+    state.busy = true
+    state.liveError = ''
+    render()
+    try {
+        for (let index = 0; index < plan.transactions.length; index++) {
+            state.liveBroadcastIndex = index
+            render()
+            const transaction = plan.transactions[index]
+            await broadcastRawTransaction(transaction.rawHex, transaction.txid)
+        }
+        session.commit(plan)
+        state.privateBalance = plan.newPrivateBalance
+        state.lockedBalance = plan.newLockedBalance
+        const createsPool = plan.transactions.some((transaction) => transaction.name === 'deploy-v4-pool')
+        const returnsToWallet = plan.action === 'withdraw' && plan.recipient === state.liveAddress
+        state.publicBalance = Math.max(
+            0,
+            state.publicBalance -
+                plan.totalFees -
+                (plan.action === 'shield' ? plan.amount : 0) -
+                (createsPool ? 1 : 0) +
+                (returnsToWallet ? plan.amount : 0)
+        )
+        const finalTx = plan.transactions.at(-1)!
+        state.activities.unshift({
+            kind: plan.action,
+            title:
+                plan.action === 'shield'
+                    ? 'Added privately on testnet'
+                    : plan.action === 'send'
+                      ? 'Transferred privately on testnet'
+                      : plan.action === 'lock'
+                        ? `Locked until block ${formatSats(plan.unlockHeight ?? 0)}`
+                        : 'Withdrawn on testnet',
+            detail: `ARC accepted · ${finalTx.txid.slice(0, 12)}…`,
+            amount: plan.amount,
+            time: 'Just now',
+            proof: shortProof(finalTx.txid),
+        })
+        state.amount = ''
+        state.recipient = ''
+        state.unlockHeight = ''
+        state.pendingLivePlan = null
+        state.liveConfirm = false
+        state.liveBroadcastIndex = -1
+        state.busy = false
+        render()
+        showToast('Exact parent-first chain accepted by ARC on testnet')
+    } catch (error) {
+        state.busy = false
+        state.liveError = error instanceof Error ? error.message : 'ARC did not accept the transaction chain'
+        render()
+    }
 }
 
 async function submit(): Promise<boolean> {
@@ -291,11 +525,15 @@ async function submit(): Promise<boolean> {
         showToast(`You only have ${formatSats(available)} sats available`)
         return false
     }
-    if (state.action === 'send' && amount === available) {
+    if ((state.action === 'send' || state.action === 'lock') && amount === available) {
         showToast('Leave at least 1 sat as private change')
         return false
     }
-    if (copy[state.action].recipient && state.recipient.trim().length < 4) {
+    if (
+        copy[state.action].recipient &&
+        !(state.liveSession && state.action === 'send') &&
+        state.recipient.trim().length < 4
+    ) {
         showToast(state.action === 'send' ? 'Enter a Veil address' : 'Enter a BSV address')
         return false
     }
@@ -309,6 +547,8 @@ async function submit(): Promise<boolean> {
         showToast(`Choose a block above ${formatSats(state.currentHeight)}`)
         return false
     }
+
+    if (state.liveSession) return prepareLiveAction(amount, unlockHeight)
 
     state.busy = true
     state.proofProgress = 1
@@ -396,6 +636,10 @@ function resetDemoState(): void {
 
 async function runDemo(): Promise<void> {
     if (state.demoRunning || state.busy) return
+    if (state.liveSession) {
+        showToast('Lock the live wallet before running the local proof demo')
+        return
+    }
     resetDemoState()
     state.demoRunning = true
     render()
@@ -454,7 +698,7 @@ function wireEvents(): void {
         const maximum =
             state.action === 'shield'
                 ? state.publicBalance
-                : state.action === 'send'
+                : state.action === 'send' || (state.liveSession !== null && state.action === 'lock')
                   ? Math.max(0, state.privateBalance - 1)
                   : state.privateBalance
         state.amount = String(maximum)
@@ -485,6 +729,42 @@ function wireEvents(): void {
     })
     document.querySelectorAll<HTMLButtonElement>('[data-proof]').forEach((row) => {
         row.addEventListener('click', () => showToast(`Groth16 statement ${row.dataset.proof} · verified locally`))
+    })
+    document.querySelector('#unlock-live-wallet')?.addEventListener('click', () => {
+        void unlockBrowserWallet()
+    })
+    document.querySelector<HTMLInputElement>('#live-password')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') void unlockBrowserWallet()
+    })
+    document.querySelector('#use-live-wallet')?.addEventListener('click', () => {
+        state.liveDialogOpen = false
+        render()
+    })
+    document.querySelector('#lock-live-wallet')?.addEventListener('click', clearLiveWallet)
+    document.querySelector<HTMLInputElement>('#live-confirm')?.addEventListener('change', (event) => {
+        state.liveConfirm = (event.target as HTMLInputElement).checked
+        render()
+    })
+    document.querySelector('#broadcast-live-plan')?.addEventListener('click', () => {
+        void broadcastLivePlan()
+    })
+    document.querySelector('#close-live-modal')?.addEventListener('click', () => {
+        if (state.busy || state.liveBroadcastIndex >= 0) return
+        state.liveDialogOpen = false
+        state.pendingLivePlan = null
+        state.liveConfirm = false
+        state.liveError = ''
+        state.liveBroadcastIndex = -1
+        render()
+    })
+    document.querySelector('#live-modal-backdrop')?.addEventListener('click', (event) => {
+        if (event.target !== event.currentTarget || state.busy || state.liveBroadcastIndex >= 0) return
+        state.liveDialogOpen = false
+        state.pendingLivePlan = null
+        state.liveConfirm = false
+        state.liveError = ''
+        state.liveBroadcastIndex = -1
+        render()
     })
 }
 
