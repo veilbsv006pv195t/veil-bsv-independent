@@ -2,8 +2,8 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-0.2.1}"
-bundle_name="veil-bsv-server-${version}"
+version="${1:-0.2.2}"
+bundle_name="veil-bsv-replay-${version}"
 release_dir="${project_root}/release"
 archive="${release_dir}/${bundle_name}.zip"
 staging_dir="$(mktemp -d)"
@@ -30,8 +30,9 @@ for item in \
   THIRD_PARTY_NOTICES.md \
   COMPATIBILITY.md \
   README.md \
+  REPLAY_GUIDE.md \
+  RUN_REPLAY.command \
   SECURITY.md \
-  SERVER_INSTALL.md \
   TESTNET_DEPLOYMENT.md \
   package.json \
   package-lock.json \

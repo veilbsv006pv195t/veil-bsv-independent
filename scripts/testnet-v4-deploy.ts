@@ -253,6 +253,15 @@ function replacementApproval(): string | null {
     return txid.toLowerCase()
 }
 
+function deploymentApproval(): string {
+    const arg = process.argv.find((value) => value.startsWith('--expect='))
+    const txid = arg?.slice('--expect='.length).toLowerCase()
+    if (!txid || !/^[0-9a-f]{64}$/.test(txid)) {
+        throw new Error('send requires --expect=<exact audited deployment TXID>')
+    }
+    return txid
+}
+
 function getPolicy(): Policy {
     const value = torJson(`${ARCADE}/policy`) as { policy?: Partial<Policy> }
     const policy = value.policy
@@ -596,20 +605,27 @@ async function main(): Promise<void> {
             readFileSync(SIGNED_FILE, 'utf8')
         ) as SignedV4Deployment
         auditSigned(signed)
-        if (!signed.broadcastBlocked || !signed.conflictsWithPendingTxid) {
-            throw new Error('This command is only for the explicitly approved v3 replacement')
+        if (deploymentApproval() !== signed.deploymentTxid.toLowerCase()) {
+            throw new Error('Approved deployment TXID does not match the audited transaction')
         }
         const approvedReplacement = replacementApproval()
-        if (approvedReplacement !== signed.conflictsWithPendingTxid.toLowerCase()) {
-            throw new Error(
-                'Refusing replacement without --replace-pending-v3=<exact pending v3 TXID>'
-            )
-        }
-        const pending = torJson(
-            `${LEGACY_ARC}/v1/tx/${signed.conflictsWithPendingTxid}`
-        ) as ArcStatus
-        if (pending.txStatus === 'MINED') {
-            throw new Error('The v3 shield is already mined; its funding outpoint cannot be replaced')
+        if (signed.broadcastBlocked) {
+            if (
+                !signed.conflictsWithPendingTxid ||
+                approvedReplacement !== signed.conflictsWithPendingTxid.toLowerCase()
+            ) {
+                throw new Error(
+                    'Refusing replacement without --replace-pending-v3=<exact pending v3 TXID>'
+                )
+            }
+            const pending = torJson(
+                `${LEGACY_ARC}/v1/tx/${signed.conflictsWithPendingTxid}`
+            ) as ArcStatus
+            if (pending.txStatus === 'MINED') {
+                throw new Error('The v3 shield is already mined; its funding outpoint cannot be replaced')
+            }
+        } else if (approvedReplacement) {
+            throw new Error('Replacement approval was supplied but the funding has no recorded conflict')
         }
         const policy = getPolicy()
         if (
@@ -692,7 +708,10 @@ async function main(): Promise<void> {
     }
     writePrivate(SIGNED_FILE, signed, true)
     console.log(JSON.stringify(built.plan, null, 2))
-    console.log('Signed v4 deployment saved locally with mode 0600; no broadcast command exists.')
+    console.log(
+        'Signed v4 deployment saved locally with mode 0600; nothing was broadcast. ' +
+        'Audit it, then send only with --expect=<exact audited deployment TXID>.'
+    )
 }
 
 main().catch((error: unknown) => {

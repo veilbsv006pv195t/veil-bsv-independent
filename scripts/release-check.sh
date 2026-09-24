@@ -26,6 +26,12 @@ fi
 jq -e '.format == "veil-v4-public-testnet-evidence-v1" and .network == "bsv-testnet"' \
   evidence/testnet-v4-lifecycle.json >/dev/null
 jq -e '.scripts["bounty:replay"] != null' package.json >/dev/null
+test -x RUN_REPLAY.command
+
+if rg -n 'veil-bsv-server|SERVER_INSTALL\.md' README.md REPLAY_GUIDE.md scripts/package-release.sh; then
+  echo "release check failed: obsolete server-oriented release wording" >&2
+  exit 1
+fi
 
 if [[ -f MANIFEST.sha256 ]]; then
   shasum -a 256 -c MANIFEST.sha256 >/dev/null

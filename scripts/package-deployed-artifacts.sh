@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-0.2.1}"
+version="${1:-0.2.2}"
 asset_name="veil-v4-deployed-proving-artifacts-${version}"
 source_dir="${project_root}/.private/deployed-artifacts"
 release_dir="${project_root}/release"

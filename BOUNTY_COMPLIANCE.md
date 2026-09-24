@@ -16,6 +16,12 @@ transfer, unshield, and simultaneous shielding plus block-height locking.
 | ZK on-chain | Groth16 BN254 verifier split across authenticated v4 stages | `npm run test:v4` and mined staged chains |
 | Shielded and locked together | `lockHeight` is committed inside the private note | Locked note plus pre-maturity exclusion and mature unshield evidence |
 | Public repo that can be replayed | Source, pinned lockfile, fresh development ceremony and exact deployed-verifier manifest | `npm ci && npm run bounty:replay` |
+| Independent testnet operation | Fresh testnet-only wallet, faucet guidance, exact-TXID/manifest approvals, and Tor-only submission | `npm run wallet:testnet:init`, `npm run wallet:testnet:status`, `TESTNET_DEPLOYMENT.md` |
+
+The public bounty wording asks for a repository that can be replayed. It does
+not require a hosted site or persistent server. `RUN_REPLAY.command` is the
+non-developer entry point: it performs the clean install and complete local
+replay without a wallet, coins, miner connection, or transaction broadcast.
 
 ## What the chain evidence proves
 
@@ -43,15 +49,19 @@ because of their size. Their SHA-256 hashes are committed in
 `evidence/deployed-v4-chain-manifest.json`; the matching files are packaged as
 the `veil-v4-deployed-proving-artifacts` release asset.
 
-## Remaining publication steps
+## Submission readiness
 
-Before announcing the bounty submission:
+The public source and immutable release provide the local replay and historical
+testnet evidence. Before announcing or replacing a release:
 
 1. run the replay from a clean clone;
 2. verify the release manifest and confidential-data scan;
-3. publish the repository and immutable release/tag;
-4. post the repository, replay command, evidence links, and limitations; and
-5. notify the bounty author through the requested public channel.
+3. verify the release tag and uploaded checksums;
+4. provide the repository, replay command, evidence links, and limitations;
+5. if a live review is requested, provide a separately funded disposable
+   testnet wallet through a private channel, never in the repository; and
+6. let the designated confidant notify the bounty author without linking the
+   operator's unrelated identities.
 
 Publishing and contacting the bounty author are deliberate external actions
 and are not performed by any replay or test command.

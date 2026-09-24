@@ -1,8 +1,9 @@
-# Demo compatibility
+# Replay compatibility
 
-Veil has a static browser demo and a separate developer replay workflow. The
-browser demo is the portable option: the server only delivers files, while the
-visitor's browser creates and verifies the proof.
+The complete bounty replay is a local command-line workflow. It starts no
+public service and needs no wallet or blockchain connection. Veil also has a
+supplementary browser demo for developers, but that UI is not part of the
+bounty acceptance path.
 
 ## Browser demo
 
@@ -38,13 +39,6 @@ second on the tested machine, but slower computers may need several seconds.
 Other rows describe expected compatibility based on the browser APIs used; they
 have not been independently tested as part of this release.
 
-## Static hosting computer
-
-Any computer capable of serving static files can host `dist-ui/`. Examples
-include an inexpensive Linux VPS, an ARM64 single-board computer, a Windows IIS
-host, Nginx, Caddy, Apache, or a static hosting service. The host does not create
-proofs and needs no database, wallet, GPU, or persistent application process.
-
 ## Full protocol replay
 
 Rebuilding the circuit and contract requires:
@@ -60,9 +54,9 @@ The full build was tested only on Apple Silicon macOS. The pinned sCrypt tooling
 contains compiler selection for macOS, Linux, and Windows, but a clean replay
 should be performed on the exact target operating system before a public demo.
 
-## Presentation recommendation
+## Review recommendation
 
-For the least risky bounty demonstration, host `dist-ui/` on HTTPS and present
-it from a current Chromium-based browser on a laptop with 8 GB or more RAM. Keep
-the command-line replay available on a separate development machine to show the
-Bitcoin Script VM acceptance and rejection tests.
+For a non-developer review on macOS, download and extract the release archive,
+then double-click `RUN_REPLAY.command`. The Terminal window reports a single
+pass or fail result after the full protocol and Bitcoin Script tests complete.
+The optional browser demo is not needed.

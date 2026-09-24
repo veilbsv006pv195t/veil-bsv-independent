@@ -80,6 +80,10 @@ const TRANSFER_BEGIN_RECEIPT_FILE = path.join(
     PRIVATE_DIR,
     'testnet-v4-transfer-begin-receipt.json'
 )
+const TRANSFER_CONFIRMATION_FILE = path.join(
+    PRIVATE_DIR,
+    'testnet-v4-transfer-confirmation.json'
+)
 const WASM = path.join(ROOT, 'build', 'shielded_pool_js', 'shielded_pool.wasm')
 const ZKEY = path.join(ROOT, 'build', 'shielded_pool_final.zkey')
 const VKEY = path.join(ROOT, 'build', 'verification_key.json')
@@ -1795,12 +1799,59 @@ function sendTransferStage(saved: SavedTransfer): void {
     console.log(`Only transfer ${stageName} was submitted.`)
 }
 
+function confirmTransfer(): void {
+    if (!existsSync(TRANSFER_SIGNED_FILE)) {
+        throw new Error('No prepared v4 private transfer exists')
+    }
+    const saved = JSON.parse(
+        readFileSync(TRANSFER_SIGNED_FILE, 'utf8')
+    ) as SavedTransfer
+    auditTransferSaved(saved, livePolicy())
+    const finalizer = saved.stages.at(-1)
+    if (!finalizer || finalizer.name !== 'finalize') {
+        throw new Error('The saved private transfer has no finalizer')
+    }
+    const mined = requireMinedStatus(finalizer.txid)
+    const confirmation = {
+        format: 'veil-v4-testnet-transfer-confirmation-v1',
+        network: 'testnet',
+        txStatus: mined.txStatus,
+        recordedAt: new Date().toISOString(),
+        finalizerTxid: mined.txid,
+        blockHeight: mined.blockHeight,
+        blockHash: mined.blockHash,
+        merklePath: mined.merklePath,
+        merkleInclusionEvidenceAvailable: true,
+        finalPoolSatoshis: saved.poolOutputSatoshis,
+        receiverLockHeight: saved.receiverLockHeight,
+        nullifier: saved.nullifier,
+        nextState: saved.nextState,
+    }
+    if (existsSync(TRANSFER_CONFIRMATION_FILE)) {
+        const existing = JSON.parse(
+            readFileSync(TRANSFER_CONFIRMATION_FILE, 'utf8')
+        ) as Record<string, unknown>
+        const stableExisting = { ...existing }
+        const stableCurrent = { ...confirmation } as Record<string, unknown>
+        delete stableExisting.recordedAt
+        delete stableCurrent.recordedAt
+        if (JSON.stringify(stableExisting) !== JSON.stringify(stableCurrent)) {
+            throw new Error('Existing transfer confirmation conflicts with live mined evidence')
+        }
+        console.log(JSON.stringify(existing, null, 2))
+        return
+    }
+    writePrivate(TRANSFER_CONFIRMATION_FILE, confirmation)
+    console.log(JSON.stringify(confirmation, null, 2))
+}
+
 async function main(): Promise<void> {
     const command = process.argv[2]
     const commands = [
         'prepare-shield', 'audit-shield', 'send-split', 'send-begin', 'send-stage',
         'confirm-shield', 'prepare-transfer', 'audit-transfer',
         'send-transfer-split', 'send-transfer-begin', 'send-transfer-stage',
+        'confirm-transfer',
     ]
     if (!commands.includes(command)) {
         throw new Error(`Usage: testnet-v4-lifecycle.ts ${commands.join('|')}`)
@@ -1817,6 +1868,10 @@ async function main(): Promise<void> {
     }
     if (command === 'prepare-transfer') {
         await prepareTransfer()
+        return
+    }
+    if (command === 'confirm-transfer') {
+        confirmTransfer()
         return
     }
     if (

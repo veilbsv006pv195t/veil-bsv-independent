@@ -19,6 +19,42 @@ npm run bounty:replay
 This is the public bounty replay. It compiles and tests everything locally and
 never broadcasts.
 
+## Fresh operator wallet and funding
+
+Create a new wallet for this testnet rehearsal only:
+
+```bash
+npm run wallet:testnet:init
+npm run wallet:testnet:status
+```
+
+The first command creates `.private/testnet-deployment-wallet.json`, protects
+it with mode `0600`, and prints only its public testnet address. It fails if the
+file already exists. `status` reparses the WIF, verifies that it is a testnet
+key and that its derived address matches the record, then prints only public
+metadata.
+
+Fund the displayed address with testnet BSV, never mainnet BSV. Public options
+listed by BSV documentation include:
+
+- <https://bsvfaucet.com/>
+- <https://witnessonchain.com/faucet/tbsv>
+- <https://docs.bsvblockchain.org/network-topology/nodes/sv-node/installation/sv-node/network-environments/testnet>
+
+The exact requirement depends on current miner policy and the selected
+lifecycle. For the complete deployment, shield, private transfer, locked note,
+and mature unshield rehearsal, start with at least **2,100,000 testnet
+satoshis (0.021 tBSV)**. This is test currency with no monetary value. Record a
+confirmed funding output as `TXID:VOUT:SATS:BLOCKHEIGHT`; do not paste the WIF
+into a shell command, issue, log, or chat.
+
+For a reviewer handoff, use a brand-new disposable wallet funded directly from
+a faucet where possible. Transfer the wallet file through a private channel,
+not GitHub. The reviewer places it at
+`.private/testnet-deployment-wallet.json`, runs `chmod 600` on it, and verifies
+it with `npm run wallet:testnet:status` before doing anything else. This keeps
+the public repository reproducible without publishing a spendable secret.
+
 ## Deployment controls
 
 ```bash
@@ -36,6 +72,11 @@ and executes the relevant checks without network access. `send` requires the
 exact audited TXID and transmits only the saved bytes. An uncertain response
 must be reconciled by TXID before any manual retry.
 
+A clean deployment no longer depends on the historical v3 replacement case.
+If an audited deployment intentionally replaces a recorded pending v3 spend,
+`send` additionally requires
+`--replace-pending-v3=EXACT_RECORDED_V3_TXID`; otherwise that flag is rejected.
+
 ## Lifecycle controls
 
 The shield and transfer paths use the same pattern: prepare, audit, then submit
@@ -46,6 +87,7 @@ npm run lifecycle:v4:prepare-shield
 npm run lifecycle:v4:audit-shield
 npm run lifecycle:v4:prepare-transfer
 npm run lifecycle:v4:audit-transfer
+npm run lifecycle:v4:confirm-transfer
 npm run lifecycle:v4:prepare-lock-test
 npm run lifecycle:v4:audit-lock-test
 ```
@@ -66,6 +108,24 @@ They form a strict dependency chain. After robust local testing, the chain can
 be submitted parent-first without waiting for a block between every stage,
 provided the chosen miner accepts the complete unconfirmed ancestor chain.
 Serial confirmation remains the conservative diagnostic mode.
+
+The exact submission commands are deliberately separate:
+
+```bash
+npm run lifecycle:v4:send-split -- --expect=EXACT_SPLIT_TXID
+npm run lifecycle:v4:send-begin -- --expect=EXACT_BEGIN_TXID
+npm run lifecycle:v4:send-stage -- --stage=prepare --expect=EXACT_TXID
+npm run lifecycle:v4:send-stage -- --stage=miller-0 --expect=EXACT_TXID
+npm run lifecycle:v4:send-stage -- --stage=miller-1 --expect=EXACT_TXID
+npm run lifecycle:v4:send-stage -- --stage=miller-2 --expect=EXACT_TXID
+npm run lifecycle:v4:send-stage -- --stage=miller-3 --expect=EXACT_TXID
+npm run lifecycle:v4:send-stage -- --stage=finalize --expect=EXACT_TXID
+```
+
+The private-transfer equivalents are `send-transfer-split`,
+`send-transfer-begin`, and `send-transfer-stage`. Always take the exact TXIDs
+and stage names from the immediately preceding audit output. Do not copy the
+historical evidence TXIDs into a fresh run.
 
 ## Completed testnet result
 

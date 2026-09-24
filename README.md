@@ -4,25 +4,18 @@ Veil is a replayable proof of concept for the bounty requirement:
 
 > ZEC-style shielded pool on BSV: notes, nullifiers, shield, private transfer, and unshield, with zero-knowledge verification on-chain.
 
-It includes both the protocol and a deliberately simple wallet UI. A non-developer sees four actions—**Add**, **Send**, **Lock**, and **Withdraw**—while the app generates and verifies a real Groth16 proof in the browser. The technical roots, paths, notes, nullifiers, and private lock heights remain behind the interface.
-
-## Try the UI
-
-Requirements: Node.js 20+ and npm.
-
-```bash
-npm ci
-npm run build:circuit
-npm run dev:ui
-```
-
-Open `http://127.0.0.1:5173`. The first proof downloads a 10 MB proving key; subsequent proofs are typically sub-second on a modern laptop.
-
-The UI is honest about its boundary: it creates and verifies real proofs against local demo state, but does **not** broadcast or spend funds. Wallet connection is read-only. The on-chain transaction path is exercised by the replay commands below.
+It includes the protocol, a complete local replay, public testnet evidence, and
+an optional wallet UI. The bounty replay does not require a running server,
+hosted website, wallet, testnet coins, or blockchain connection.
 
 ## One-command bounty replay
 
-From a clean clone with Node.js 20+ and npm:
+The release archive includes `RUN_REPLAY.command`. On macOS, double-click it and
+choose **Open** if Finder asks for confirmation. It installs the pinned
+dependencies and runs the complete replay in a Terminal window.
+
+From a clean clone with Node.js 20+ and npm, the equivalent terminal commands
+are:
 
 ```bash
 npm ci
@@ -40,6 +33,52 @@ CPU-intensive; `snarkjs powersoftau prepare phase2` may use all available CPU
 cores for several minutes. The fresh key proves independent source replay. The
 same command separately checks the committed deployment verification key
 against the exact v4 contract hashes that were mined on testnet.
+
+See [`REPLAY_GUIDE.md`](REPLAY_GUIDE.md) for the short non-developer checklist
+and the exact success criteria.
+
+## Optional local wallet UI
+
+The UI is supplementary and is not required to satisfy or replay the bounty.
+It creates and verifies real proofs against local demo state, but does **not**
+broadcast or spend funds. Developers can run it locally with:
+
+```bash
+npm run build:circuit
+npm run dev:ui
+```
+
+Then open `http://127.0.0.1:5173`. This temporary local development process is
+only a file preview for the optional UI; it is not a Veil server or part of the
+bounty replay.
+
+## Independent live testnet operator
+
+The replay above needs no wallet or coins. An operator who wants to reproduce
+the mined lifecycle can instead create a fresh, testnet-only wallet:
+
+```bash
+npm run wallet:testnet:init
+npm run wallet:testnet:status
+```
+
+`init` prints only the funding address. The private key stays in the ignored
+`.private/testnet-deployment-wallet.json` file with mode `0600`; the command
+refuses to replace an existing wallet. Fund that address with **testnet BSV
+only**. The BSV documentation lists public testnet faucets, including
+[`bsvfaucet.com`](https://bsvfaucet.com/) and
+[`witnessonchain.com/faucet/tbsv`](https://witnessonchain.com/faucet/tbsv).
+A full deployment plus shield, transfer, lock, and unshield rehearsal should
+start with at least 2,100,000 testnet satoshis for the current scripted fee
+budget and headroom.
+
+The live path remains intentionally controlled: prepare locally, audit exact
+bytes, approve the displayed TXID or manifest hash, then submit parent-first
+through Tor. It is not driven by the browser UI. See
+[`TESTNET_DEPLOYMENT.md`](TESTNET_DEPLOYMENT.md) for the complete operator
+runbook. A pre-funded demonstration wallet may be handed to a reviewer through
+a private channel, but its key must never be committed, attached to a release,
+or posted publicly.
 
 For the short circuit-only demonstration, run:
 
@@ -151,6 +190,7 @@ The contract then enforces:
 | Unshield | One private note becomes an optional change note plus a bound P2PKH payout |
 | ZK on-chain | Compiled sCrypt covenant calls the BN254 Groth16 verifier and binds transaction outputs |
 | Replayable | Scripted clean build, three-transition CLI replay, negative tests, browser prover, and Script VM test |
+| Independent live use | Fresh testnet-only wallet initialization, public faucet guidance, guarded exact-TXID submission, and mined public evidence |
 
 ## Repository map
 
