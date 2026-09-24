@@ -8,6 +8,14 @@ It includes the protocol, a complete local replay, public testnet evidence, and
 an optional wallet UI. The bounty replay does not require a running server,
 hosted website, wallet, testnet coins, or blockchain connection.
 
+**Live static demo:**
+[`veilbsv006pv195t.github.io/veil-bsv-independent`](https://veilbsv006pv195t.github.io/veil-bsv-independent/)
+
+The site has no Veil backend and never receives private inputs. Proof generation
+and verification run in the visitor's browser against local demo state. The
+public repository replay and mined testnet evidence remain the authoritative
+implementation evidence.
+
 ## One-command bounty replay
 
 The release archive includes `RUN_REPLAY.command`. On macOS, double-click it and
