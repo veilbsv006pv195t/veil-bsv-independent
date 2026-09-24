@@ -53,7 +53,7 @@ done
 # The prebuilt site already contains the large proving assets. Do not package a
 # second copy under ui/public/zk; `npm run build:circuit` regenerates and syncs
 # those files when a recipient chooses the source-rebuild path.
-mkdir -p "${bundle_dir}/ui" "${bundle_dir}/artifacts/src/v4" "${bundle_dir}/build/v4"
+mkdir -p "${bundle_dir}/ui" "${bundle_dir}/artifacts/src/v4" "${bundle_dir}/artifacts/v4"
 cp "${project_root}/ui/index.html" "${bundle_dir}/ui/"
 cp "${project_root}/ui/vite.config.ts" "${bundle_dir}/ui/"
 cp -R "${project_root}/ui/src" "${bundle_dir}/ui/"
@@ -62,7 +62,7 @@ cp -R "${project_root}/ui/src" "${bundle_dir}/ui/"
 # contract artifacts. Benchmark compiler output is not part of the release.
 cp "${project_root}/artifacts/shieldedPool.json" "${bundle_dir}/artifacts/"
 cp "${project_root}"/artifacts/src/v4/*.json "${bundle_dir}/artifacts/src/v4/"
-cp "${project_root}/build/v4/chain-manifest.json" "${bundle_dir}/build/v4/"
+cp "${project_root}/artifacts/v4/chain-manifest.json" "${bundle_dir}/artifacts/v4/"
 
 cp "${project_root}/build/.gitkeep" "${bundle_dir}/build/.gitkeep"
 

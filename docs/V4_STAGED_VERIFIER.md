@@ -32,7 +32,7 @@ npm run build:v4
 npm run test:v4
 ```
 
-`build:v4` compiles the contracts and writes `build/v4/chain-manifest.json`
+`build:v4` compiles the contracts and writes `artifacts/v4/chain-manifest.json`
 using the real public verification key. `test:v4` creates a fresh shield proof
 and executes all seven transactions in the Bitcoin Script interpreter under a
 10,000-byte Script-number policy.

@@ -13,7 +13,7 @@ trap cleanup EXIT
 git ls-files --cached --others --exclude-standard \
   | LC_ALL=C sort \
   | while IFS= read -r file; do
-      if [[ "${file}" != "MANIFEST.sha256" ]]; then
+      if [[ -f "${file}" && "${file}" != "MANIFEST.sha256" ]]; then
         shasum -a 256 "${file}"
       fi
     done > "${manifest_tmp}"

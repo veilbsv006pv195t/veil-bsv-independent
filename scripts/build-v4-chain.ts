@@ -19,7 +19,7 @@ function option(name: string, fallback: string): string {
 }
 
 const VKEY = path.resolve(option('vkey', 'build/verification_key.json'))
-const OUT = path.resolve(option('out', 'build/v4/chain-manifest.json'))
+const OUT = path.resolve(option('out', 'artifacts/v4/chain-manifest.json'))
 const EXPECT = process.argv.find((value) => value.startsWith('--expect='))?.slice('--expect='.length)
 const ZERO_HASH = Sha256(toByteString('00'.repeat(32)))
 
