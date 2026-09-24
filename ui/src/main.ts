@@ -5,6 +5,7 @@ import { broadcastRawTransaction, explorerUrl, testnetHeight } from './live-netw
 import { unlockLiveWallet } from './live-wallet'
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
+type Theme = 'light' | 'dark'
 
 interface Activity {
     kind: Action
@@ -32,10 +33,23 @@ const icons = {
     check: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12.5 3.5 3.5L18 7.5"/></svg>`,
     lock: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8 10V8a4 4 0 0 1 8 0v2"/></svg>`,
     copy: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`,
+    sun: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></svg>`,
+    moon: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.4A8 8 0 0 1 9.6 3.5 8.5 8.5 0 1 0 20.5 14.4Z"/></svg>`,
+}
+
+function initialTheme(): Theme {
+    try {
+        const stored = localStorage.getItem('veil-theme')
+        if (stored === 'light' || stored === 'dark') return stored
+    } catch {
+        // Privacy-focused browsers may disable storage; the system preference still works.
+    }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 const state = {
     action: 'shield' as Action,
+    theme: initialTheme(),
     privateBalance: 1_000,
     lockedBalance: 0,
     publicBalance: 25_400,
@@ -67,6 +81,8 @@ const state = {
         },
     ] as Activity[],
 }
+
+document.documentElement.dataset.theme = state.theme
 
 const copy = {
     shield: {
@@ -129,6 +145,9 @@ function render(): void {
           <div class="header-actions">
             <button class="network" data-run-demo ${state.demoRunning || state.busy ? 'disabled' : ''}>
               <i></i> ${state.demoRunning ? 'Running demo…' : 'Run local proof demo'}
+            </button>
+            <button class="theme-toggle" id="theme-toggle" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode" title="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
+              ${state.theme === 'dark' ? icons.sun : icons.moon}
             </button>
             <button class="wallet-button" id="connect-wallet">
               ${live
@@ -690,6 +709,16 @@ function wireEvents(): void {
         })
     })
     document.querySelector('#connect-wallet')?.addEventListener('click', connectWallet)
+    document.querySelector('#theme-toggle')?.addEventListener('click', () => {
+        state.theme = state.theme === 'dark' ? 'light' : 'dark'
+        document.documentElement.dataset.theme = state.theme
+        try {
+            localStorage.setItem('veil-theme', state.theme)
+        } catch {
+            // The selected theme still applies for this tab when storage is unavailable.
+        }
+        render()
+    })
     document.querySelector('#copy-address')?.addEventListener('click', async () => {
         await navigator.clipboard?.writeText('veil1qx7kd2v5myu8r3e4psw0c9t6g8f4n')
         showToast('Private address copied')
