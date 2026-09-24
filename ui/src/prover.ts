@@ -8,7 +8,73 @@ export interface ProofResult {
     elapsedMs: number
 }
 
+export type ProofProgress = (percent: number, label: string) => void
+
 const proofAsset = (name: string): string => `${import.meta.env.BASE_URL}zk/${name}`
+
+let wasmBytes: Uint8Array | undefined
+let provingKeyBytes: Uint8Array | undefined
+
+async function downloadProofAsset(
+    name: string,
+    startPercent: number,
+    endPercent: number,
+    onProgress: ProofProgress
+): Promise<Uint8Array> {
+    const response = await fetch(proofAsset(name))
+    if (!response.ok) throw new Error(`${name} is unavailable`)
+
+    const total = Number(response.headers.get('content-length'))
+    if (!response.body || !Number.isFinite(total) || total <= 0) {
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        onProgress(endPercent, 'Proof data downloaded')
+        return bytes
+    }
+
+    const reader = response.body.getReader()
+    const bytes = new Uint8Array(total)
+    let received = 0
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (received + value.byteLength > bytes.byteLength) {
+            throw new Error(`${name} download exceeded its declared size`)
+        }
+        bytes.set(value, received)
+        received += value.byteLength
+        const fraction = received / total
+        const percent = Math.min(
+            endPercent,
+            startPercent + Math.floor(fraction * (endPercent - startPercent))
+        )
+        onProgress(percent, 'Downloading private proof data')
+    }
+    if (received !== total) throw new Error(`${name} download was incomplete`)
+    onProgress(endPercent, 'Proof data downloaded')
+    return bytes
+}
+
+async function loadProofAssets(onProgress: ProofProgress): Promise<{
+    wasm: Uint8Array
+    provingKey: Uint8Array
+}> {
+    if (!wasmBytes) {
+        wasmBytes = await downloadProofAsset('shielded_pool.wasm', 2, 6, onProgress)
+    } else {
+        onProgress(6, 'Circuit ready')
+    }
+    if (!provingKeyBytes) {
+        provingKeyBytes = await downloadProofAsset(
+            'shielded_pool_final.zkey',
+            6,
+            84,
+            onProgress
+        )
+    } else {
+        onProgress(84, 'Proof data ready')
+    }
+    return { wasm: wasmBytes, provingKey: provingKeyBytes }
+}
 
 const hashPromise: Promise<HashFn> = fetch(proofAsset('mimc_constants.json'))
     .then((response) => {
@@ -56,8 +122,10 @@ export async function proveAction(
     privateBalance: bigint,
     recipient: string,
     unlockHeight = 0n,
-    currentHeight = 0n
+    currentHeight = 0n,
+    onProgress: ProofProgress = () => undefined
 ): Promise<ProofResult> {
+    onProgress(1, 'Preparing private proof')
     const hash = await hashPromise
     const pool = new PoolState(hash)
     const owner = await textField('veil-demo-owner')
@@ -128,14 +196,18 @@ export async function proveAction(
         }
     }
 
+    const { wasm, provingKey } = await loadProofAssets(onProgress)
+    onProgress(86, 'Generating zero-knowledge proof')
     const started = performance.now()
     const { proof, publicSignals } = await groth16.fullProve(
         transition.circuitInput,
-        proofAsset('shielded_pool.wasm'),
-        proofAsset('shielded_pool_final.zkey')
+        wasm,
+        provingKey
     )
+    onProgress(97, 'Verifying proof locally')
     if (!(await groth16.verify(await verificationKey(), publicSignals, proof))) {
         throw new Error('The generated zero-knowledge proof did not verify')
     }
+    onProgress(100, 'Private proof verified')
     return { publicSignal: publicSignals[0], elapsedMs: performance.now() - started }
 }

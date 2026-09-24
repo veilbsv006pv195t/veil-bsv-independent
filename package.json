@@ -69,6 +69,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@noble/hashes": "1.8.0",
     "circomlib": "2.0.5",
     "circomlibjs": "0.1.7",
     "scrypt-ts": "1.4.5",

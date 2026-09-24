@@ -13,8 +13,8 @@ declare module 'snarkjs' {
     export const groth16: {
         fullProve(
             input: unknown,
-            wasmPath: string,
-            zkeyPath: string
+            wasmPath: string | Uint8Array,
+            zkeyPath: string | Uint8Array
         ): Promise<{ proof: unknown; publicSignals: string[] }>
         verify(vkey: unknown, publicSignals: string[], proof: unknown): Promise<boolean>
     }

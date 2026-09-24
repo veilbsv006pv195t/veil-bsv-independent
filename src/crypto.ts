@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2'
+
 export const TREE_DEPTH = 4
 export const TREE_CAPACITY = 1 << TREE_DEPTH
 export const FIELD =
@@ -128,10 +130,9 @@ export const PUBLIC_FIELD_ORDER: readonly (keyof PublicTransition)[] = [
 export function statementHash(hash: HashFn, transition: PublicTransition): bigint {
     void hash
     const widths = [1, 1, 32, 32, 32, 32, 1, 1, 32, 32, 32, 8, 8, 20, 4] as const
-    const Buffer = (bsv as any).deps.Buffer
     const encode = (value: bigint, bytes: number) => {
         if (value < 0n) throw new Error('statement fields must be nonnegative')
-        const output = Buffer.alloc(bytes)
+        const output = new Uint8Array(bytes)
         let remaining = value
         for (let i = 0; i < bytes; i++) {
             output[i] = Number(remaining & 0xffn)
@@ -146,7 +147,14 @@ export function statementHash(hash: HashFn, transition: PublicTransition): bigin
             encode(transition[key], widths[index])
         ),
     ]
-    const digest = bsv.crypto.Hash.sha256(Buffer.concat(encoded))
+    const serializedLength = encoded.reduce((total, value) => total + value.length, 0)
+    const serialized = new Uint8Array(serializedLength)
+    let offset = 0
+    for (const value of encoded) {
+        serialized.set(value, offset)
+        offset += value.length
+    }
+    const digest = sha256(serialized)
     let statement = 0n
     for (let i = 30; i >= 0; i--) {
         statement = (statement << 8n) + BigInt(digest[i])
@@ -405,4 +413,3 @@ export class PoolState {
         }
     }
 }
-import { bsv } from 'scrypt-ts'

@@ -96,6 +96,11 @@ main { padding: 66px 0 48px; }
 .primary-button:disabled { cursor: wait; opacity: .78; }
 .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.35); border-top-color: white; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.proof-progress { margin-top: 12px; }
+.proof-progress-track { display: block; height: 7px; overflow: hidden; border-radius: 99px; background: #e4e8e2; }
+.proof-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green), #42a879); transition: width .18s ease-out; }
+.proof-progress-copy { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: #778079; font-size: 10px; }
+.proof-progress-copy strong { color: var(--green); font-variant-numeric: tabular-nums; }
 .trust-line { display: flex; justify-content: center; gap: 6px; align-items: center; margin-top: 13px; color: #8a928d; font-size: 9px; }
 .trust-line svg { width: 12px; color: var(--green-2); }
 

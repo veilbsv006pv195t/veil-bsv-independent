@@ -39,6 +39,8 @@ const state = {
     currentHeight: 910_000,
     connected: false,
     busy: false,
+    proofProgress: 0,
+    proofProgressLabel: '',
     recipient: '',
     amount: '',
     unlockHeight: '',
@@ -190,6 +192,12 @@ function render(): void {
               <button class="primary-button" id="submit-action" ${state.busy ? 'disabled' : ''}>
                 ${state.busy ? '<span class="spinner"></span> Creating private proof…' : `${active.cta} <span>→</span>`}
               </button>
+              ${state.busy ? `
+                <div class="proof-progress" role="progressbar" aria-valuemin="1" aria-valuemax="100" aria-valuenow="${state.proofProgress}">
+                  <div class="proof-progress-track"><span style="width: ${state.proofProgress}%"></span></div>
+                  <div class="proof-progress-copy"><span id="proof-progress-label">${state.proofProgressLabel}</span><strong id="proof-progress-percent">${state.proofProgress}%</strong></div>
+                </div>
+              ` : ''}
               <div class="trust-line">${icons.lock}<span>Keys stay in your wallet. Proofs reveal no private details.</span></div>
             </section>
           </section>
@@ -232,6 +240,19 @@ function showToast(message: string): void {
     toast.textContent = message
     toast.classList.add('show')
     window.setTimeout(() => toast.classList.remove('show'), 2800)
+}
+
+function updateProofProgress(percent: number, label: string): void {
+    state.proofProgress = Math.max(1, Math.min(100, Math.round(percent)))
+    state.proofProgressLabel = label
+    const progress = document.querySelector<HTMLDivElement>('.proof-progress')
+    const track = document.querySelector<HTMLSpanElement>('.proof-progress-track span')
+    const labelElement = document.querySelector<HTMLSpanElement>('#proof-progress-label')
+    const percentElement = document.querySelector<HTMLElement>('#proof-progress-percent')
+    if (progress) progress.setAttribute('aria-valuenow', String(state.proofProgress))
+    if (track) track.style.width = `${state.proofProgress}%`
+    if (labelElement) labelElement.textContent = label
+    if (percentElement) percentElement.textContent = `${state.proofProgress}%`
 }
 
 async function connectWallet(): Promise<void> {
@@ -285,6 +306,8 @@ async function submit(): Promise<void> {
     }
 
     state.busy = true
+    state.proofProgress = 1
+    state.proofProgressLabel = 'Preparing private proof'
     render()
     let proof
     try {
@@ -294,10 +317,13 @@ async function submit(): Promise<void> {
             BigInt(state.privateBalance),
             state.recipient,
             state.action === 'lock' ? BigInt(unlockHeight) : 0n,
-            BigInt(state.currentHeight)
+            BigInt(state.currentHeight),
+            updateProofProgress
         )
     } catch (error) {
         state.busy = false
+        state.proofProgress = 0
+        state.proofProgressLabel = ''
         render()
         showToast(error instanceof Error ? error.message : 'Could not create the private proof')
         return
@@ -328,10 +354,13 @@ async function submit(): Promise<void> {
         time: 'Just now',
         proof: shortProof(proof.publicSignal),
     })
+    await new Promise((resolve) => window.setTimeout(resolve, 500))
     state.amount = ''
     state.recipient = ''
     state.unlockHeight = ''
     state.busy = false
+    state.proofProgress = 0
+    state.proofProgressLabel = ''
     render()
     showToast('Done — zero-knowledge proof verified')
 }
