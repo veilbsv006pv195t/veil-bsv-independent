@@ -32,26 +32,32 @@ async function downloadProofAsset(
     }
 
     const reader = response.body.getReader()
-    const bytes = new Uint8Array(total)
+    // Content-Length can describe the compressed transfer size while the
+    // Fetch stream yields decompressed bytes (notably in Tor/WebKit shells).
+    // Grow the buffer when needed instead of rejecting a valid response.
+    let bytes = new Uint8Array(total)
     let received = 0
     while (true) {
         const { done, value } = await reader.read()
         if (done) break
         if (received + value.byteLength > bytes.byteLength) {
-            throw new Error(`${name} download exceeded its declared size`)
+            const expanded = new Uint8Array(
+                Math.max(received + value.byteLength, bytes.byteLength * 2)
+            )
+            expanded.set(bytes.subarray(0, received))
+            bytes = expanded
         }
         bytes.set(value, received)
         received += value.byteLength
-        const fraction = received / total
+        const fraction = Math.min(received / total, 1)
         const percent = Math.min(
             endPercent,
             startPercent + Math.floor(fraction * (endPercent - startPercent))
         )
         onProgress(percent, 'Downloading private proof data')
     }
-    if (received !== total) throw new Error(`${name} download was incomplete`)
     onProgress(endPercent, 'Proof data downloaded')
-    return bytes
+    return bytes.slice(0, received)
 }
 
 async function loadProofAssets(onProgress: ProofProgress): Promise<{
