@@ -38,6 +38,7 @@ const state = {
     publicBalance: 25_400,
     currentHeight: 910_000,
     connected: false,
+    demoRunning: false,
     busy: false,
     proofProgress: 0,
     proofProgressLabel: '',
@@ -110,7 +111,9 @@ function render(): void {
             <span>Veil</span>
           </a>
           <div class="header-actions">
-            <span class="network"><i></i> Testnet demo</span>
+            <button class="network" data-run-demo ${state.demoRunning || state.busy ? 'disabled' : ''}>
+              <i></i> ${state.demoRunning ? 'Running demo…' : 'Run testnet demo'}
+            </button>
             <button class="wallet-button" id="connect-wallet">
               ${state.connected ? '<span class="wallet-dot"></span> Wallet connected' : 'Connect wallet'}
             </button>
@@ -145,7 +148,9 @@ function render(): void {
 
               <div class="balance-footer">
                 <div><span>Available in wallet</span><strong>${formatSats(state.publicBalance)} sats</strong></div>
-                <span class="demo-label">${state.connected ? 'WALLET' : 'DEMO'}</span>
+                ${state.connected
+                    ? '<span class="demo-label">WALLET</span>'
+                    : `<button class="demo-label" data-run-demo ${state.demoRunning || state.busy ? 'disabled' : ''}>${state.demoRunning ? 'RUNNING' : 'DEMO'}</button>`}
               </div>
             </aside>
 
@@ -275,24 +280,24 @@ async function connectWallet(): Promise<void> {
     showToast('No BSV wallet found — staying in safe demo mode')
 }
 
-async function submit(): Promise<void> {
+async function submit(): Promise<boolean> {
     const amount = Number.parseInt(state.amount, 10)
     const available = state.action === 'shield' ? state.publicBalance : state.privateBalance
     if (!Number.isSafeInteger(amount) || amount <= 0) {
         showToast('Enter an amount greater than zero')
-        return
+        return false
     }
     if (amount > available) {
         showToast(`You only have ${formatSats(available)} sats available`)
-        return
+        return false
     }
     if (state.action === 'send' && amount === available) {
         showToast('Leave at least 1 sat as private change')
-        return
+        return false
     }
     if (copy[state.action].recipient && state.recipient.trim().length < 4) {
         showToast(state.action === 'send' ? 'Enter a Veil address' : 'Enter a BSV address')
-        return
+        return false
     }
     const unlockHeight = Number.parseInt(state.unlockHeight, 10)
     if (
@@ -302,7 +307,7 @@ async function submit(): Promise<void> {
             unlockHeight >= 500_000_000)
     ) {
         showToast(`Choose a block above ${formatSats(state.currentHeight)}`)
-        return
+        return false
     }
 
     state.busy = true
@@ -326,7 +331,7 @@ async function submit(): Promise<void> {
         state.proofProgressLabel = ''
         render()
         showToast(error instanceof Error ? error.message : 'Could not create the private proof')
-        return
+        return false
     }
 
     if (state.action === 'shield') {
@@ -363,9 +368,74 @@ async function submit(): Promise<void> {
     state.proofProgressLabel = ''
     render()
     showToast('Done — zero-knowledge proof verified')
+    return true
+}
+
+function resetDemoState(): void {
+    state.action = 'shield'
+    state.privateBalance = 1_000
+    state.lockedBalance = 0
+    state.publicBalance = 25_400
+    state.busy = false
+    state.proofProgress = 0
+    state.proofProgressLabel = ''
+    state.recipient = ''
+    state.amount = ''
+    state.unlockHeight = ''
+    state.activities = [
+        {
+            kind: 'shield',
+            title: 'Added privately',
+            detail: 'Groth16 verified locally · replay seed',
+            amount: 1_000,
+            time: 'Just now',
+            proof: '20e4…81b9',
+        },
+    ]
+}
+
+async function runDemo(): Promise<void> {
+    if (state.demoRunning || state.busy) return
+    resetDemoState()
+    state.demoRunning = true
+    render()
+    showToast('Running the complete private-money demo')
+
+    const steps: Array<{ action: Action; amount: string; recipient?: string; unlockHeight?: string }> = [
+        { action: 'shield', amount: '400' },
+        { action: 'send', amount: '200', recipient: 'veil1jackdemo' },
+        { action: 'lock', amount: '200', unlockHeight: String(state.currentHeight + 100) },
+        { action: 'withdraw', amount: '200', recipient: '1JackDemoAddress' },
+    ]
+
+    for (const step of steps) {
+        state.action = step.action
+        state.amount = step.amount
+        state.recipient = step.recipient ?? ''
+        state.unlockHeight = step.unlockHeight ?? ''
+        render()
+        document.querySelector('.wallet-grid')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        await new Promise((resolve) => window.setTimeout(resolve, 900))
+        if (!(await submit())) {
+            state.demoRunning = false
+            render()
+            showToast('Demo stopped before completion')
+            return
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 900))
+    }
+
+    state.demoRunning = false
+    render()
+    document.querySelector('.activity-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    await new Promise((resolve) => window.setTimeout(resolve, 700))
+    showToast('Demo complete — four real proofs verified locally')
 }
 
 function wireEvents(): void {
+    document.querySelectorAll<HTMLButtonElement>('[data-run-demo]').forEach((button) => {
+        button.addEventListener('click', runDemo)
+    })
     document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((button) => {
         button.addEventListener('click', () => {
             state.action = button.dataset.action as Action
@@ -407,7 +477,9 @@ function wireEvents(): void {
             render()
         })
     })
-    document.querySelector('#submit-action')?.addEventListener('click', submit)
+    document.querySelector('#submit-action')?.addEventListener('click', () => {
+        void submit()
+    })
     document.querySelector('#proof-info')?.addEventListener('click', () => {
         showToast('Notes hide balances. Nullifiers stop double-spends. Block locks are proven privately.')
     })

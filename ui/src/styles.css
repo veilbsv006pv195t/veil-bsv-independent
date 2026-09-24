@@ -24,7 +24,9 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .brand-mark { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; color: white; background: var(--green); box-shadow: 0 7px 18px rgba(22,79,57,.22); }
 .brand-mark svg { width: 20px; }
 .header-actions { display: flex; gap: 11px; align-items: center; }
-.network { display: flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 99px; color: #59625d; background: rgba(255,255,255,.55); font-size: 12px; font-weight: 650; }
+.network { display: flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 99px; color: #59625d; background: rgba(255,255,255,.55); font-size: 12px; font-weight: 650; transition: .15s; }
+.network:hover:not(:disabled) { color: var(--green); background: white; transform: translateY(-1px); }
+.network:disabled { cursor: wait; opacity: .7; }
 .network i, .wallet-dot { width: 7px; height: 7px; border-radius: 50%; background: #3eaf72; box-shadow: 0 0 0 3px #daf3e4; }
 .wallet-button { border: 0; border-radius: 11px; color: white; background: var(--ink); padding: 11px 16px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px; transition: transform .15s, background .15s; }
 .wallet-button:hover { background: #29352e; transform: translateY(-1px); }
@@ -65,7 +67,10 @@ main { padding: 66px 0 48px; }
 .balance-footer div { display: flex; flex-direction: column; gap: 4px; }
 .balance-footer span { color: rgba(255,255,255,.45); font-size: 11px; }
 .balance-footer strong { font-size: 14px; }
-.demo-label { padding: 4px 7px; border: 1px solid rgba(255,255,255,.16); border-radius: 6px; letter-spacing: .08em; font-weight: 800; }
+.demo-label { padding: 4px 7px; border: 1px solid rgba(255,255,255,.16); border-radius: 6px; color: rgba(255,255,255,.58); background: rgba(255,255,255,.03); letter-spacing: .08em; font-weight: 800; }
+button.demo-label { cursor: pointer; transition: .15s; }
+button.demo-label:hover:not(:disabled) { color: white; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
+button.demo-label:disabled { cursor: wait; opacity: .75; }
 
 .action-card { padding: 12px 29px 25px; background: var(--paper); }
 .action-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; background: #f0f2ed; padding: 5px; border-radius: 13px; }
