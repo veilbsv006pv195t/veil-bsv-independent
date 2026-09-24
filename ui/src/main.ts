@@ -143,7 +143,7 @@ function render(): void {
         <main>
           <section class="hero-copy">
             <div class="privacy-pill">${icons.lock} Zero-knowledge privacy</div>
-            <h1>Your BSV.<br><em>Nobody else’s business.</em></h1>
+            <h1>Veil your BSV</h1>
             <p>Deposit, pay, and withdraw without revealing your private activity.</p>
           </section>
 
