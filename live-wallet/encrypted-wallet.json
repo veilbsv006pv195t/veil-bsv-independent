@@ -1,0 +1,18 @@
+{
+  "format": "veil-live-wallet-encrypted-v1",
+  "network": "testnet",
+  "address": "mhjvr8VZSfeJqgqRYgUzZMjAftzZ5A1uSu",
+  "funding": {
+    "txid": "289e38cca774813bc9829add60ef5de7b43a5ce913836f0bb78db880b93a2f23",
+    "vout": 0,
+    "satoshis": 9999000
+  },
+  "algorithm": "AES-256-GCM",
+  "kdf": {
+    "name": "PBKDF2-SHA-256",
+    "iterations": 600000,
+    "salt": "azIpD4ybMCR62F6Gw+2U7hsR9ZZRT5cvdaIZt99gNd4="
+  },
+  "iv": "brbp81XAad+Hqr+c",
+  "ciphertext": "Ltc2V15s0kKiennnP6RHQMxcnjFG4De8ZLR8n2quE2XLZJ5F7BblmHDYW/iTkDn03zZDuh1MX/aC5GcxHHBQG5c3tlVV4fLVcLrCj3qDmNJn3GsVhFc15LMQytbZRCKlD4ut7zcGSkjCPOIewm4jhb49/h6sbY9dCvUtMU2akj7yPzFtWTryK6kQ4PpqjlSrCev0M6/qLH/Q5oRD1iTKt0YtOzMJJ9m9TPQqrMHQdRVKas2TlEPNXzHm21GBZnc5sH/wpVzHgjojeBuB9kocGieWC7eNNJ8q9W7BRahvr9OyVoNqp+EWFxDpsS4O2C9sTRyo8KNU1CHp9+uRd4UEC6MGbngFS6VrK+em+ubybNjIcaXZZToZRYbbLZShIQz/Qniuw7vL1FGWKAKfM7W+/dbtrJIVH4KXNgri/6+OHBxjPda2OhChSyg="
+}
