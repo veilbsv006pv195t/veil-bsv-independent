@@ -349,8 +349,9 @@ function liveDialog(): string {
             <div class="unlocked-address"><span>Mined fee-funding output · ${formatSats(state.receivingWallet.funding.satoshis)} sats</span><strong class="wrap-address">${state.receivingWallet.funding.txid}:${state.receivingWallet.funding.vout}</strong></div>
             <p>Funding transaction and wallet ownership checked. Mining does not prove this output is still unspent. Do not spend from this wallet in another tab or browser.</p>
           ` : ''}
-          <div class="unlocked-address"><span>Veil v2 receiving address · share this, never your backup</span><strong class="wrap-address">${escapeHtml(state.receivingAddress)}</strong></div>
-          <button class="secondary-button" id="copy-receiving-address">Copy receiving address</button>
+          <div class="unlocked-address"><span>This wallet’s Veil receiving address · give this to the sender</span><strong class="wrap-address">${escapeHtml(state.receivingAddress)}</strong></div>
+          <button class="secondary-button" id="copy-receiving-address">Copy this wallet’s receiving address</button>
+          <p>To receive here, give this address to another wallet. To send from here, enter the OTHER wallet’s receiving address—not this one. Never share your backup.</p>
           <p>${state.guided ? 'Save both wallets together. Close this dialog to allow mining checks and automatic synchronization. A mined snapshot is not an unspent-output guarantee; never transact from another tab using these wallets.' : state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : state.fundingChecked ? 'Funded wallet ready. Save its encrypted backup, then prepare a fresh pool. Preparation does not broadcast; the exact transactions require a separate review.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
