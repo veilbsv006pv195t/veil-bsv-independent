@@ -6,11 +6,14 @@ import { unlockLiveWallet, createReceivingWallet, validateReceivingWallet, type 
 import { createHash } from '../../src/crypto'
 import { recipientIdentity, RECIPIENT_PROTOCOL, type EncryptedPayment } from '../../src/recipient'
 import { encryptBackup, decryptBackup, type WalletBackup } from '../../src/walletBackup'
+import { GuidedDemo, GUIDED_FORMAT, GUIDED_MARKER, otherRole, type Role } from './guided-demo'
+import { fetchUsdQuote, mainnetUsd, isFresh, type UsdQuote } from './usd-price'
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
 type Theme = 'light' | 'dark'
 
 interface Activity {
+    received?: boolean
     kind: Action
     title: string
     detail: string
@@ -51,6 +54,16 @@ function initialTheme(): Theme {
 }
 
 const state = {
+    guided: null as GuidedDemo | null,
+    guidedRequested: true,
+    guidedMessage: '',
+    guidedPolling: false,
+    guidedViews: {
+        sender: { fundingChecked: false, activities: [] as Activity[] },
+        recipient: { fundingChecked: false, activities: [] as Activity[] },
+    },
+    quote: null as UsdQuote | null,
+    priceLoading: false,
     action: 'shield' as Action,
     theme: initialTheme(),
     privateBalance: 1_000,
@@ -140,7 +153,7 @@ function render(): void {
     const live = state.liveSession !== null
     const needsRecipient = active.recipient
     const actionDescription = live && state.action === 'send'
-        ? 'Send to another wallet’s Veil v2 address. After mining, deliver the encrypted payment file. Only that recipient can spend the note. No automatic delivery or discovery.'
+        ? state.guided ? 'Guided demo: the other wallet is prefilled. You can replace it. Payment to the demo wallet is imported automatically after ARC reports MINED; external recipients still need the encrypted payment file.' : 'Send to another wallet’s Veil v2 address. After mining, deliver the encrypted payment file. Only that recipient can spend the note. No automatic delivery or discovery.'
         : active.description
     document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <div class="shell">
@@ -172,6 +185,14 @@ function render(): void {
             <span>New protocol; do not import old pool notes. No contract is deployed merely by opening this page.</span>
             <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/" target="_blank" rel="noopener noreferrer">Open previous version for comparison ↗</a>
           </aside>
+          ${state.guided ? `<aside class="version-notice guided-controls" aria-label="Guided two-wallet demo">
+            <strong>Guided demo · ${state.guided.active === 'sender' ? 'Sender' : 'Demo recipient'} wallet</strong>
+            <span>Two separate keys in this browser for demonstration. Back up both together. Not a separately controlled third-party wallet.</span>
+            <div>${(['sender', 'recipient'] as Role[]).map(role => `<button class="secondary-button" data-wallet-role="${role}" aria-pressed="${state.guided!.active === role}" ${state.busy || state.liveUnlocking || state.pendingLivePlan || state.guidedPolling ? 'disabled' : ''}>${role === 'sender' ? 'Sender' : 'Demo recipient'}</button>`).join('')}</div>
+            <span role="status">${escapeHtml(state.guidedMessage || (state.guided.pending ? 'Waiting for mining. Automatic handoff checks every 30 seconds while this page is open.' : 'Ready. Save a combined backup before preparing an action.'))}</span>
+            ${state.guided.pending ? `<a href="${explorerUrl(state.guided.pending.txid)}" target="_blank" rel="noopener noreferrer">View pending finalizer ↗</a><button class="secondary-button" id="check-guided-handoff" ${state.guidedPolling ? 'disabled' : ''}>Check mining and handoff now</button>` : ''}
+            ${state.guided.active === 'recipient' ? '<span>The recipient starts with no fee funding. Receiving is free; sending or withdrawing requires a separate mined fee-funding output. No funds are moved automatically.</span>' : ''}
+          </aside>` : ''}
           <section class="hero-copy">
             <div class="privacy-pill">${icons.lock} Zero-knowledge privacy</div>
             <h1>Veil your BSV</h1>
@@ -185,7 +206,7 @@ function render(): void {
                 <span class="status-chip">${icons.check} Protected</span>
               </div>
               <div class="balance"><strong>${formatSats(state.privateBalance)}</strong><span>sats</span></div>
-              <div class="balance-fiat">≈ £${(state.privateBalance * 0.0000042).toFixed(2)} <span>(~mainnet currency)</span></div>
+              <div class="balance-fiat" id="usd-estimate">${usdMarkup()}</div>
 
               <div class="locked-summary ${state.lockedBalance > 0 ? 'has-lock' : ''}">
                 ${icons.lock}
@@ -224,6 +245,7 @@ function render(): void {
                 <div class="text-field">
                   <input id="recipient" autocomplete="off" spellcheck="false" placeholder="${active.recipientPlaceholder}" value="${escapeHtml(state.recipient)}" />
                 </div>
+                ${state.guided && state.action === 'send' ? `<p class="recipient-hint">Editable destination. <button id="use-demo-recipient" type="button">Use ${state.guided.active === 'sender' ? 'demo recipient' : 'sender'} address</button></p>` : ''}
               ` : ''}
 
               <label class="field-label" for="amount">Amount</label>
@@ -245,7 +267,7 @@ function render(): void {
                 </div>
               ` : ''}
 
-              <button class="primary-button" id="submit-action" ${state.busy ? 'disabled' : ''}>
+              <button class="primary-button" id="submit-action" ${state.busy || state.guidedPolling || state.guided?.pending || (state.guided && !live) ? 'disabled' : ''}>
                 ${state.busy
                     ? '<span class="spinner"></span> Preparing audited transaction chain…'
                     : live
@@ -329,18 +351,17 @@ function liveDialog(): string {
           ` : ''}
           <div class="unlocked-address"><span>Veil v2 receiving address · share this, never your backup</span><strong class="wrap-address">${escapeHtml(state.receivingAddress)}</strong></div>
           <button class="secondary-button" id="copy-receiving-address">Copy receiving address</button>
-          <p>${state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : state.fundingChecked ? 'Funded wallet ready. Save its encrypted backup, then prepare a fresh pool. Preparation does not broadcast; the exact transactions require a separate review.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
+          <p>${state.guided ? 'Save both wallets together. Close this dialog to allow mining checks and automatic synchronization. A mined snapshot is not an unspent-output guarantee; never transact from another tab using these wallets.' : state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : state.fundingChecked ? 'Funded wallet ready. Save its encrypted backup, then prepare a fresh pool. Preparation does not broadcast; the exact transactions require a separate review.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
-          <button class="secondary-button" id="save-wallet-backup">Download encrypted wallet backup${state.backupDirty ? ' · required' : ''}</button>
-          <label class="field-label" for="payment-file">Import encrypted payment file</label>
-          <input id="payment-file" type="file" accept=".json,application/json" />
+          <button class="secondary-button" id="save-wallet-backup">Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}</button>
+          ${state.guided ? '<p>This one encrypted file includes BOTH keys, private notes and any pending handoff. Keep the newest download; the website password alone does not recover these notes. Restore this file after a reload—do not unlock the original funding envelope again.</p>' : '<button class="secondary-button" id="enable-guided-demo">Set up guided demo recipient</button>'}
+          ${state.guided ? '' : '<label class="field-label" for="payment-file">Import encrypted payment file</label><input id="payment-file" type="file" accept=".json,application/json" />'}
           ${state.liveSession ? `
             <button class="secondary-button" id="save-payment-file" ${state.liveSession.paymentFile() ? '' : 'disabled'}>Download last encrypted payment</button>
             <button class="secondary-button" id="save-pool-state">Download public pool update</button>
-            <label class="field-label" for="pool-file">Import next public pool update</label>
-            <input id="pool-file" type="file" accept=".json,application/json" />
-          ` : `<button class="primary-button" id="start-new-pool" ${state.fundingChecked ? '' : 'disabled'}>Prepare a fresh pool with this funded wallet</button>`}
+            ${state.guided ? '' : '<label class="field-label" for="pool-file">Import next public pool update</label><input id="pool-file" type="file" accept=".json,application/json" />'}
+          ` : state.guided?.active === 'recipient' ? '<p>Waiting for the sender’s payment. The guided recipient joins that pool automatically after mining.</p>' : `<button class="primary-button" id="start-new-pool" ${state.fundingChecked ? '' : 'disabled'}>Prepare a fresh pool with this funded wallet</button>`}
             <details><summary>Bind a mined funding output for fees</summary>
               <p>Use a still-unspent P2PKH output to this wallet’s testnet address. This replaces the tracked fee output; it does not consolidate other coins.</p>
               <label for="funding-hex">Raw funding transaction (hex)</label><textarea id="funding-hex" spellcheck="false"></textarea>
@@ -352,6 +373,8 @@ function liveDialog(): string {
         ` : `
           <p>The separately delivered password decrypts the disposable wallet locally. It is never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
           <label class="field-label" for="live-password">Live-wallet password</label>
+          <label class="live-confirm"><input id="guided-demo-choice" type="checkbox" ${state.guidedRequested ? 'checked' : ''} /> Guided demo: create a separate recipient on first setup</label>
+          <p>If you have used this funded wallet already, restore its newest encrypted backup below instead of unlocking the original funding envelope. A reload never restores private notes from the website password.</p>
           <div class="text-field"><input id="live-password" type="password" autocomplete="current-password" spellcheck="false" /></div>
           <button class="primary-button" id="unlock-live-wallet" ${state.liveUnlocking ? 'disabled' : ''}>
             ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : 'Unlock in this browser →'}
@@ -368,12 +391,118 @@ function liveDialog(): string {
     </div>`
 }
 
+function usdMarkup(): string {
+    const q = state.quote
+    return `${q ? mainnetUsd(state.privateBalance, q) : 'USD estimate unavailable'} <span>(~mainnet currency)</span><br><small>Testnet coins have no monetary value.</small><br>
+      ${q && isFresh(q) ? `<small>CoinGecko: $${q.usdPerBsv} / BSV · ${escapeHtml(new Date(q.updatedAt).toISOString())}</small>` : ''}
+      <button id="refresh-usd" type="button" ${state.priceLoading ? 'disabled' : ''}>${state.priceLoading ? 'Checking USD price…' : 'Refresh USD price'}</button>`
+}
+
+async function refreshUsd(): Promise<void> {
+    if (state.priceLoading) return
+    state.priceLoading = true
+    // Do not re-render password fields or a transaction review on quote updates.
+    try { state.quote = await fetchUsdQuote() } catch { state.quote = null }
+    finally { state.priceLoading = false; updateUsdDisplay() }
+}
+function updateUsdDisplay(): void {
+    const node = document.querySelector('#usd-estimate')
+    if (node) { node.innerHTML = usdMarkup(); node.querySelector('#refresh-usd')?.addEventListener('click', () => void refreshUsd()) }
+}
+
+function rememberGuided(): void {
+    try { localStorage.setItem(GUIDED_MARKER, 'restore-backup-required') } catch { /* No secrets or addresses in storage. */ }
+}
+function hasGuidedMarker(): boolean {
+    try { return localStorage.getItem(GUIDED_MARKER) !== null } catch { return false }
+}
+async function enableGuided(): Promise<void> {
+    if (state.guided) return
+    if (hasGuidedMarker()) throw new Error('A guided pair was previously created. Restore its latest two-wallet backup; do not replace the recipient.')
+    const wallet = state.receivingWallet ?? (state.liveSession?.backupPayload() as { wallet: LiveWallet } | undefined)?.wallet
+    if (!wallet) throw new Error('Unlock or restore the sender first')
+    const pair = await GuidedDemo.create(wallet, state.liveSession)
+    state.guided = pair
+    state.guidedViews = {
+        sender: { fundingChecked: state.fundingChecked, activities: state.activities },
+        recipient: { fundingChecked: false, activities: [] },
+    }
+    rememberGuided()
+    state.backupDirty = true
+    state.guidedMessage = 'Separate recipient created. Download the combined two-wallet backup before proceeding.'
+    if (state.action === 'send') state.recipient = pair.defaultRecipient()
+}
+function syncGuidedSlot(): void {
+    const pair = state.guided
+    if (!pair) return
+    const slot = pair.slots[pair.active]
+    slot.session = state.liveSession
+    if (state.receivingWallet) slot.wallet = state.receivingWallet
+    state.guidedViews[pair.active] = { fundingChecked: state.fundingChecked, activities: state.activities }
+}
+function selectGuidedRole(role: Role): void {
+    const pair = state.guided
+    if (!pair || state.busy || state.pendingLivePlan || state.liveUnlocking || state.guidedPolling) return
+    syncGuidedSlot()
+    pair.active = role
+    displayGuidedRole()
+    state.action = 'send'
+    state.amount = ''
+    state.recipient = pair.defaultRecipient()
+    state.liveError = ''
+    state.liveDialogOpen = false
+    render()
+}
+function displayGuidedRole(): void {
+    const pair = state.guided!
+    const slot = pair.slots[pair.active]
+    state.liveSession = slot.session
+    state.receivingWallet = slot.session ? null : slot.wallet
+    state.liveAddress = slot.wallet.address
+    state.receivingAddress = slot.address
+    state.privateBalance = slot.session?.privateBalance() ?? 0
+    state.lockedBalance = slot.session?.lockedBalance(state.currentHeight) ?? 0
+    state.publicBalance = slot.session?.fundingBalance() ?? slot.wallet.funding.satoshis
+    state.fundingChecked = state.guidedViews[pair.active].fundingChecked
+    state.activities = state.guidedViews[pair.active].activities
+    state.connected = true
+}
+async function checkGuidedHandoff(): Promise<void> {
+    const pair = state.guided
+    if (!pair?.pending || state.guidedPolling || state.busy || state.liveUnlocking || state.pendingLivePlan || state.liveDialogOpen) return
+    state.guidedPolling = true
+    syncGuidedSlot()
+    const pending = pair.pending
+    const peerRole = otherRole(pending.from)
+    const previousBalance = pair.slots[peerRole].session?.privateBalance() ?? 0
+    try {
+        const changed = await pair.poll(updateProofProgress)
+        if (state.guided !== pair) return
+        if (changed) {
+            state.backupDirty = true
+            if (pending.payment) state.guidedViews[peerRole].activities.unshift({
+                kind: 'send', received: true, title: 'Received privately on testnet',
+                detail: `ARC reports MINED · ${pending.txid.slice(0, 12)}…`,
+                amount: (pair.slots[peerRole].session?.privateBalance() ?? 0) - previousBalance,
+                time: 'Just now', proof: shortProof(pending.txid),
+            })
+            displayGuidedRole()
+            state.guidedMessage = 'ARC reports MINED. Both wallets synchronized; any demo payment has been imported. Save an updated two-wallet backup.'
+        } else state.guidedMessage = 'Waiting for mining. No recipient funds credited yet; no transactions are resent.'
+    } catch (error) { state.guidedMessage = error instanceof Error ? error.message : 'Mining check unavailable; handoff retained for retry.' }
+    finally {
+        state.guidedPolling = false
+        // Avoid clearing a passphrase or file input while the user backs up.
+        if (!state.liveDialogOpen && !state.pendingLivePlan) render()
+    }
+}
+
 function tab(action: Action, label: string, icon: string): string {
     return `<button class="action-tab ${state.action === action ? 'active' : ''}" data-action="${action}">${icon}<span>${label}</span></button>`
 }
 
 function activityRow(activity: Activity): string {
-    const sign = activity.kind === 'shield' ? '+' : activity.kind === 'lock' ? '' : '−'
+    const sign = activity.received || activity.kind === 'shield' ? '+' : activity.kind === 'lock' ? '' : '−'
     return `<button class="activity-row" data-proof="${activity.proof}">
       <span class="activity-icon ${activity.kind}">${icons[activity.kind]}</span>
       <span class="activity-main"><strong>${activity.title}</strong><small>${activity.detail}</small></span>
@@ -440,6 +569,7 @@ async function connectWallet(): Promise<void> {
 }
 
 async function unlockBrowserWallet(): Promise<void> {
+    if (state.liveUnlocking || state.busy || state.guidedPolling) return
     const input = document.querySelector<HTMLInputElement>('#live-password')
     let password = input?.value ?? ''
     if (input) input.value = ''
@@ -447,6 +577,7 @@ async function unlockBrowserWallet(): Promise<void> {
     state.liveError = ''
     render()
     try {
+        if (hasGuidedMarker()) throw new Error('Restore your latest two-wallet backup below. Do not reopen the original funded wallet after creating a guided pair.')
         const { wallet, fundingChecked } = await unlockLiveWallet(password)
         password = ''
         const height = await testnetHeight()
@@ -461,6 +592,7 @@ async function unlockBrowserWallet(): Promise<void> {
         state.lockedBalance = 0
         state.currentHeight = height
         state.activities = []
+        if (state.guidedRequested) await enableGuided()
     } catch (error) {
         password = ''
         state.liveError = error instanceof Error ? error.message : 'Could not unlock the live wallet'
@@ -473,9 +605,11 @@ async function unlockBrowserWallet(): Promise<void> {
 }
 
 function clearLiveWallet(): void {
-    if (state.busy || state.pendingLivePlan) return
+    if (state.busy || state.pendingLivePlan || state.guidedPolling) return
     if (state.backupDirty) { state.liveError = 'Download an up-to-date encrypted wallet backup before clearing this tab.'; state.liveDialogOpen = true; render(); return }
     state.liveSession = null
+    state.guided = null
+    state.guidedMessage = ''
     state.receivingWallet = null
     state.receivingAddress = ''
     state.fundingChecked = false
@@ -504,13 +638,13 @@ async function readJsonFile(file: File | undefined): Promise<any> {
     return JSON.parse(await file.text())
 }
 async function walletTask(task: () => Promise<void>): Promise<void> {
-    if (state.busy || state.liveUnlocking || state.pendingLivePlan) return
+    if (state.busy || state.liveUnlocking || state.pendingLivePlan || state.guidedPolling) return
     state.busy = true
     state.liveError = ''
     render()
     try { await task() }
     catch (error) { state.liveError = error instanceof Error ? error.message : 'Wallet operation failed' }
-    finally { state.busy = false; state.liveDialogOpen = true; render() }
+    finally { syncGuidedSlot(); state.busy = false; state.liveDialogOpen = true; render() }
 }
 async function adoptSession(session: LiveVeilSession): Promise<void> {
     state.liveSession = session
@@ -526,18 +660,34 @@ async function adoptSession(session: LiveVeilSession): Promise<void> {
     state.activities = []
 }
 async function saveBackup(password: string): Promise<void> {
-    const payload = state.liveSession?.backupPayload() ?? {
+    syncGuidedSlot()
+    const payload = state.guided?.backupPayload() ?? state.liveSession?.backupPayload() ?? {
         protocol: RECIPIENT_PROTOCOL, wallet: state.receivingWallet, pool: null, notes: [],
     }
     const encrypted = await encryptBackup(payload, password)
     // Test authentication before offering the file. The user still needs to
     // retain both the downloaded file and passphrase outside this browser.
     await decryptBackup(encrypted, password)
-    downloadJson(encrypted, 'veil-encrypted-wallet-backup.json')
+    downloadJson(encrypted, state.guided ? 'veil-encrypted-two-wallet-backup.json' : 'veil-encrypted-wallet-backup.json')
     state.backupDirty = false
 }
 async function restoreWallet(envelope: WalletBackup, password: string): Promise<void> {
     const payload = await decryptBackup(envelope, password) as any
+    if (payload?.format === GUIDED_FORMAT) {
+        const pair = await GuidedDemo.restore(payload, updateProofProgress)
+        state.guided = pair
+        state.guidedViews = {
+            sender: { fundingChecked: false, activities: [] },
+            recipient: { fundingChecked: false, activities: [] },
+        }
+        rememberGuided()
+        displayGuidedRole()
+        state.recipient = pair.defaultRecipient()
+        state.guidedMessage = pair.pending ? 'Restored both wallets and pending handoff. Checking mining automatically.' : 'Restored both wallets from the encrypted backup; no replacement keys generated.'
+        state.backupDirty = false
+        return
+    }
+    if (hasGuidedMarker()) throw new Error('This is a single-wallet backup. Restore the combined two-wallet backup to retain the existing recipient.')
     if (payload?.protocol !== RECIPIENT_PROTOCOL || !Array.isArray(payload.notes)) throw new Error('Unsupported backup payload')
     if (!payload.pool) {
         if (payload.notes.length) throw new Error('Backup has notes without a pool')
@@ -556,6 +706,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         await adoptSession(await LiveVeilSession.restoreBackup(payload, updateProofProgress))
     }
     state.backupDirty = false
+    if (state.guidedRequested) await enableGuided()
 }
 
 window.addEventListener('beforeunload', event => {
@@ -574,6 +725,8 @@ async function prepareLiveAction(amount: number, unlockHeight: number): Promise<
     state.proofProgressLabel = 'Preparing exact testnet transaction chain'
     render()
     try {
+        state.guided?.assertReady()
+        if (state.guided && state.backupDirty) throw new Error('Download the latest two-wallet backup before preparing another action')
         const plan = await session.prepare(
             state.action,
             amount,
@@ -616,6 +769,11 @@ async function broadcastLivePlan(): Promise<void> {
             await broadcastRawTransaction(transaction.rawHex, transaction.txid)
         }
         session.commit(plan)
+        syncGuidedSlot()
+        if (state.guided) {
+            state.guided.accepted(plan)
+            state.guidedMessage = 'ARC accepted the chain. Waiting for mining before automatic handoff; keep this page open and save both wallets now.'
+        }
         state.privateBalance = plan.newPrivateBalance
         state.lockedBalance = plan.newLockedBalance
         state.publicBalance = session.fundingBalance()
@@ -637,7 +795,7 @@ async function broadcastLivePlan(): Promise<void> {
             proof: shortProof(finalTx.txid),
         })
         state.amount = ''
-        state.recipient = ''
+        state.recipient = state.action === 'send' && state.guided ? state.guided.defaultRecipient() : ''
         state.unlockHeight = ''
         state.pendingLivePlan = null
         state.liveConfirm = false
@@ -646,7 +804,7 @@ async function broadcastLivePlan(): Promise<void> {
         render()
         state.liveDialogOpen = true
         render()
-        showToast(plan.action === 'send' ? 'ARC accepted. Save your backup and encrypted payment file; recipient imports after mining.' : 'ARC accepted. Save an updated encrypted backup and share the pool update with the other wallet.')
+        showToast(state.guided ? 'ARC accepted. Save the combined backup, then close this dialog to check mining and synchronize both wallets.' : plan.action === 'send' ? 'ARC accepted. Save your backup and encrypted payment file; recipient imports after mining.' : 'ARC accepted. Save an updated encrypted backup and share the pool update with the other wallet.')
     } catch (error) {
         state.busy = false
         state.liveError = error instanceof Error ? error.message : 'ARC did not accept the transaction chain'
@@ -655,6 +813,8 @@ async function broadcastLivePlan(): Promise<void> {
 }
 
 async function submit(): Promise<boolean> {
+    if (state.guided?.pending || state.guidedPolling) { showToast('Wait for mining and wallet synchronization'); return false }
+    if (state.guided?.active === 'recipient' && !state.liveSession) { showToast('Waiting for a mined payment to the demo recipient'); return false }
     if (state.receivingWallet) { state.liveDialogOpen = true; render(); showToast('Import a payment or prepare a funded pool first'); return false }
     const amount = Number.parseInt(state.amount, 10)
     const available = state.action === 'shield' ? state.publicBalance : state.privateBalance
@@ -817,6 +977,16 @@ async function runDemo(): Promise<void> {
 }
 
 function wireEvents(): void {
+    document.querySelector('#refresh-usd')?.addEventListener('click', () => void refreshUsd())
+    document.querySelector<HTMLInputElement>('#guided-demo-choice')?.addEventListener('change', event => {
+        state.guidedRequested = (event.target as HTMLInputElement).checked
+    })
+    document.querySelector('#enable-guided-demo')?.addEventListener('click', () => void walletTask(enableGuided))
+    document.querySelectorAll<HTMLButtonElement>('[data-wallet-role]').forEach(button => button.addEventListener('click', () => selectGuidedRole(button.dataset.walletRole as Role)))
+    document.querySelector('#check-guided-handoff')?.addEventListener('click', () => void checkGuidedHandoff())
+    document.querySelector('#use-demo-recipient')?.addEventListener('click', () => {
+        if (state.guided && !state.busy && !state.pendingLivePlan) { state.recipient = state.guided.defaultRecipient(); render() }
+    })
     document.querySelector('#create-receiving-wallet')?.addEventListener('click', () => void walletTask(async () => {
         const wallet = createReceivingWallet()
         state.receivingWallet = wallet
@@ -850,6 +1020,7 @@ function wireEvents(): void {
     document.querySelector<HTMLInputElement>('#payment-file')?.addEventListener('change', event => {
         const file = (event.target as HTMLInputElement).files?.[0]
         void walletTask(async () => {
+            if (state.guided) throw new Error('Guided mode imports payments automatically after mining. Use a separate ordinary wallet for manual imports.')
             const payment = await readJsonFile(file) as EncryptedPayment
             if (state.liveSession) {
                 await state.liveSession.importPayment(payment)
@@ -870,6 +1041,7 @@ function wireEvents(): void {
     document.querySelector<HTMLInputElement>('#pool-file')?.addEventListener('change', event => {
         const file = (event.target as HTMLInputElement).files?.[0]
         void walletTask(async () => {
+            if (state.guided) throw new Error('Guided mode synchronizes pool state automatically after mining')
             await state.liveSession!.importPoolSnapshot(await readJsonFile(file))
             await adoptSession(state.liveSession!)
         })
@@ -878,6 +1050,7 @@ function wireEvents(): void {
         const raw = document.querySelector<HTMLTextAreaElement>('#funding-hex')!.value.trim()
         const index = Number(document.querySelector<HTMLInputElement>('#funding-index')!.value)
         void walletTask(async () => {
+            state.guided?.assertReady()
             if (state.liveSession) {
                 await state.liveSession.bindFunding(raw, index)
                 state.publicBalance = state.liveSession.fundingBalance()
@@ -891,6 +1064,7 @@ function wireEvents(): void {
         })
     })
     document.querySelector('#start-new-pool')?.addEventListener('click', () => void walletTask(async () => {
+        if (state.guided && (state.guided.active !== 'sender' || state.backupDirty)) throw new Error('Save the combined backup first; only the sender prepares a fresh pool')
         if (!state.fundingChecked || !state.receivingWallet) throw new Error('Bind mined funding first')
         const { LiveVeilSession } = await import('./live-builder')
         await adoptSession(await LiveVeilSession.create(state.receivingWallet, updateProofProgress))
@@ -900,9 +1074,10 @@ function wireEvents(): void {
     })
     document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((button) => {
         button.addEventListener('click', () => {
+            if (state.busy || state.pendingLivePlan || state.guidedPolling) return
             state.action = button.dataset.action as Action
             state.amount = ''
-            state.recipient = ''
+            state.recipient = state.action === 'send' && state.guided ? state.guided.defaultRecipient() : ''
             state.unlockHeight = ''
             render()
         })
@@ -999,3 +1174,7 @@ function wireEvents(): void {
 }
 
 render()
+// Quotes disclose no wallet identifiers to the provider. Requests use this browser's route.
+void refreshUsd()
+window.setInterval(() => { updateUsdDisplay(); void refreshUsd() }, 5 * 60_000)
+window.setInterval(() => void checkGuidedHandoff(), 30_000)

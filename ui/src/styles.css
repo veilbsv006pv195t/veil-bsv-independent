@@ -231,6 +231,17 @@ footer a { color: var(--green); text-decoration: none; font-weight: 700; }
 :root[data-theme="dark"] .live-error { color: #ffb8b8 !important; background: #422020; }
 :root[data-theme="dark"] .toast { color: #132019; background: #eef4ef; }
 
+.guided-controls > div { display: flex; gap: 10px; flex-wrap: wrap; }
+.guided-controls > span { display: block; margin-block: 10px; }
+.guided-controls button { width: auto; margin: 0; padding-inline: 14px; }
+.guided-controls button[aria-pressed="true"] { background: var(--green); color: white; }
+:root[data-theme="dark"] .guided-controls button[aria-pressed="true"] { color: #fff; }
+.recipient-hint { font-size: 13px; overflow-wrap: anywhere; }
+.recipient-hint button { background: transparent; color: var(--green); border: 0; text-decoration: underline; cursor: pointer; }
+#usd-estimate { line-height: 1.6; overflow-wrap: anywhere; }
+#usd-estimate small { font-size: 11px; }
+#refresh-usd { display: block; color: inherit; background: transparent; border: 0; padding: 4px 0; font-size: 11px; text-decoration: underline; cursor: pointer; }
+
 @media (max-width: 760px) {
   .shell { width: min(100% - 24px, 620px); }
   .topbar { height: 72px; }

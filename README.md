@@ -59,7 +59,9 @@ version has been deployed.
 The static site supports independent receiving wallets, authenticated encrypted
 payment files, encrypted wallet backups, and explicit public pool updates. There
 is no relayer, automatic inbox, automatic discovery, or concurrent-wallet
-coordination service. See [TWO_WALLET_DEMO.md](TWO_WALLET_DEMO.md) for the exact
+coordination service. Guided mode coordinates two demo keys in one browser only;
+it is not automatic delivery to an external user's wallet.
+See [TWO_WALLET_DEMO.md](TWO_WALLET_DEMO.md) for the exact
 serverless handoff and limitations. This development ceremony and prototype are
 **testnet only, not production-audited**.
 
@@ -74,6 +76,47 @@ npm run test:two-wallet
 `test:two-wallet` executes the real browser transaction builder, proofs,
 signatures, and Script interpreter. All network responses are synthetic fixtures;
 it never broadcasts and is not evidence of a live deployment.
+
+### Guided demo and USD estimates
+
+The first funded-wallet unlock can create a separate demo recipient (the guided
+option is checked by default). Ordinary mode leaves Send blank. Guided mode
+prefills the other wallet's complete address, allows editing it, and provides
+Sender / Demo recipient switches. Both independent keys are controlled by the
+same browser operator; this does not demonstrate separate human custody.
+
+Before proceeding, download the combined encrypted two-wallet backup using a
+24-character-or-longer passphrase. After each accepted action download it again,
+then close the wallet dialog to allow read-only mining checks (every 30 seconds).
+After ARC reports MINED, the encrypted payment is imported into the demo
+recipient, or the other wallet's pool snapshot is synchronized. Save the updated
+backup again. No new action is prepared while this handoff is pending. Rejection,
+missing status and transport errors retain the pending handoff for review/retry;
+there is no automatic rebroadcast. MINED here is ARC-reported, not independently
+verified Merkle evidence. Custom recipient addresses still require manual file
+delivery to the external wallet.
+
+Reload recovery is explicit: **restore the latest combined encrypted backup**.
+No plaintext keys or notes are persisted. A non-secret local marker prevents
+accidental replacement in the same browser profile, but Tor may clear that marker
+on exit; the backup remains essential. Do not unlock the original funded envelope
+to resume a used wallet. An existing single-wallet v0.3.0 session can migrate by
+restoring its latest backup before initial guided setup. A pending accepted chain
+can be restored once mined; a partially broadcast chain still requires the
+original open tab. Keep both the newest backup and its passphrase.
+
+The recipient can receive without fee funding, but needs a separate mined
+testnet fee-funding output before spending or withdrawing. Guided mode never
+automatically transfers funding. Restored pool-less wallets must revalidate their
+funding via the existing bind-funding workflow before preparing a fresh pool.
+
+The mainnet-equivalent display uses `sats / 100,000,000 * BSV/USD`, in USD only,
+with a CoinGecko quote and timestamp. Quotes older than 15 minutes are not used.
+A read-only public quote is requested on startup, every five minutes, and on
+manual refresh, with no wallet details or referrer. An unavailable/blocked quote
+displays "USD estimate unavailable", never a hard-coded fallback. Testnet coins
+have no monetary value. For example, **at $21.40 per BSV**, 100,000 sats is
+**$0.0214 USD**; that example rate is not a permanent price.
 
 ### Unsigned-recipient correction
 

@@ -18,7 +18,39 @@ The new circuit lives in `circuits/recipient/`; its artifacts are isolated in
 `build/recipient/` and `ui/public/zk/recipient/`. A different verification key
 means a new verifier chain and pool deployment. Legacy replay stays separate.
 
-## Before recording
+## Guided mode: both demo wallets in one browser
+
+Use **Guided demo** on first funded-wallet unlock. If you already have a live
+v0.3.0 balance, first save its latest encrypted single-wallet backup in the old
+tab, then restore that backup in the upgraded page; do not re-unlock the stale
+original funding envelope. Initial setup creates a separate demo recipient and
+prefills its full address in Send. Both keys remain under the demonstrator's
+control. Uncheck guided mode for the ordinary independent-wallet flow below.
+
+1. Save the combined encrypted **two-wallet** backup before any action. Keep
+   the file and its 24+ character passphrase privately. Password inputs are masked.
+2. Choose Add, Send, Lock or Withdraw and the amount. Send's demo address is
+   editable; the exact review still requires a checkbox and broadcast click.
+3. After acceptance, save an updated combined backup. Close the wallet dialog
+   and keep the page open. Read-only checks run every 30 seconds; you can also
+   use **Check mining and handoff now**. No new action is allowed while pending.
+4. Once ARC reports MINED, Veil imports a demo payment into the other wallet
+   and synchronizes pool state automatically. Switch to **Demo recipient** to
+   see its balance. Save the newly synchronized combined backup.
+5. To demonstrate the recipient spending, supply and bind a separate mined
+   testnet fee-funding output to that recipient. Funds are not moved automatically
+   for fees. Then review and explicitly broadcast its chosen action as usual.
+
+Restore the latest combined file after reopening the page: this preserves both
+identities and pending handoff without replacing the recipient. The page stores
+only a non-secret setup marker; Tor may clear it on exit. There is no automatic
+secret restoration from the website password. An accepted pending handoff can
+be restored once mined, but a partial broadcast still needs the original tab.
+Switches preserve each wallet's in-tab activity; backups preserve wallet state,
+not the presentation-only activity list. An external recipient still needs the
+downloaded encrypted payment file delivered manually.
+
+## Ordinary mode: before recording
 
 1. Use separate browser tabs for wallet A and wallet B. For network privacy,
    use the verified Tor-routed browser for **both**. The site itself cannot
@@ -74,7 +106,8 @@ separately; do not describe the offline rehearsal as a live broadcast.
 ## Important limits
 
 - No Veil backend is needed, but public testnet APIs and a static host are.
-- Delivery is manual. Files can be several MB because they include public
+- External-wallet delivery is manual. Guided mode only automates delivery between
+  its two local demo wallets. Files can be several MB because they include public
   transaction lineage. There is no automatic inbox or wallet discovery.
 - Synchronize **each** public pool update in order. Missing intermediate
   updates, stale snapshots and a different pool are rejected. Do not make
