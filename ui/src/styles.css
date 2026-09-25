@@ -119,6 +119,11 @@ button.demo-label:disabled { cursor: wait; opacity: .75; }
 .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.35); border-top-color: white; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .proof-progress { margin-top: 12px; }
+.proof-progress.indeterminate .proof-progress-track span { animation: proof-pending 1.6s ease-in-out infinite; }
+@keyframes proof-pending { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  .proof-progress.indeterminate .proof-progress-track span { animation: none; transform: translateX(95%); }
+}
 .proof-progress-track { display: block; height: 7px; overflow: hidden; border-radius: 99px; background: #e4e8e2; }
 .proof-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green), #42a879); transition: width .18s ease-out; }
 .proof-progress-copy { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: #778079; font-size: 10px; }

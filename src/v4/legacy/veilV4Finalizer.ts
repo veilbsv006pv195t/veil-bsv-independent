@@ -1,8 +1,9 @@
-import { UnsignedEncoding } from '../unsignedEncoding'
+// Frozen pre-uint160-fix contract, used only to reproduce historical deployment evidence.
 import {
     assert,
     ByteString,
     hash256,
+    int2ByteString,
     method,
     prop,
     Sha256,
@@ -10,12 +11,12 @@ import {
     Utils,
 } from 'scrypt-ts'
 import { BN256, FQ12 } from 'scrypt-ts-lib/dist/ec/bn256'
-import { PreparedLine, StagedGroth16 } from './stagedGroth16'
+import { PreparedLine, StagedGroth16 } from '../stagedGroth16'
 import {
     V4MillerState,
     V4State,
     V4Transition,
-} from './v4State'
+} from '../v4State'
 
 /** Completes the pairing check and releases only the proof-bound pool state. */
 export class VeilV4Finalizer extends SmartContract {
@@ -113,7 +114,7 @@ export class VeilV4Finalizer extends SmartContract {
 
         if (transition.publicOut > 0n) {
             assert(
-                transition.recipientPkh == UnsignedEncoding.uint160(transition.recipientField),
+                transition.recipientPkh == int2ByteString(transition.recipientField, 20n),
                 'recipient does not match proof'
             )
         } else {

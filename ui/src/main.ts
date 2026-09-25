@@ -65,7 +65,7 @@ const state = {
     liveBroadcastIndex: -1,
     demoRunning: false,
     busy: false,
-    proofProgress: 0,
+    proofProgress: 0 as number | null,
     proofProgressLabel: '',
     recipient: '',
     amount: '',
@@ -241,11 +241,12 @@ function render(): void {
                       : `${active.cta} <span>→</span>`}
               </button>
               ${state.busy ? `
-                <div class="proof-progress" role="progressbar" aria-valuemin="1" aria-valuemax="100" aria-valuenow="${state.proofProgress}">
-                  <div class="proof-progress-track"><span style="width: ${state.proofProgress}%"></span></div>
-                  <div class="proof-progress-copy"><span id="proof-progress-label">${state.proofProgressLabel}</span><strong id="proof-progress-percent">${state.proofProgress}%</strong></div>
+                <div class="proof-progress${state.proofProgress === null ? ' indeterminate' : ''}" role="progressbar" aria-label="Transaction preparation" aria-valuemin="1" aria-valuemax="100" ${state.proofProgress === null ? '' : `aria-valuenow="${state.proofProgress}"`} aria-valuetext="${escapeHtml(state.proofProgressLabel)}">
+                  <div class="proof-progress-track"><span style="width: ${state.proofProgress === null ? '35%' : `${state.proofProgress}%`}"></span></div>
+                  <div class="proof-progress-copy"><span id="proof-progress-label">${escapeHtml(state.proofProgressLabel)}</span><strong id="proof-progress-percent">${state.proofProgress === null ? '' : `${state.proofProgress}%`}</strong></div>
                 </div>
               ` : ''}
+              ${live && state.liveError && !state.pendingLivePlan && !state.liveDialogOpen ? `<p class="live-error" role="alert">${escapeHtml(state.liveError)} No transaction was broadcast by this preparation attempt.</p>` : ''}
               <div class="trust-line">${icons.lock}<span>${live
                   ? 'Key stays in this tab. Nothing broadcasts before exact TXID review.'
                   : 'Keys stay in your wallet. Proofs reveal no private details.'}</span></div>
@@ -351,17 +352,22 @@ function showToast(message: string): void {
     window.setTimeout(() => toast.classList.remove('show'), 2800)
 }
 
-function updateProofProgress(percent: number, label: string): void {
-    state.proofProgress = Math.max(1, Math.min(100, Math.round(percent)))
+function updateProofProgress(percent: number | null, label: string): void {
+    state.proofProgress = percent === null ? null : Math.max(1, Math.min(100, Math.round(percent)))
     state.proofProgressLabel = label
     const progress = document.querySelector<HTMLDivElement>('.proof-progress')
     const track = document.querySelector<HTMLSpanElement>('.proof-progress-track span')
     const labelElement = document.querySelector<HTMLSpanElement>('#proof-progress-label')
     const percentElement = document.querySelector<HTMLElement>('#proof-progress-percent')
-    if (progress) progress.setAttribute('aria-valuenow', String(state.proofProgress))
-    if (track) track.style.width = `${state.proofProgress}%`
+    if (progress) {
+        progress.classList.toggle('indeterminate', state.proofProgress === null)
+        progress.setAttribute('aria-valuetext', label)
+        if (state.proofProgress === null) progress.removeAttribute('aria-valuenow')
+        else progress.setAttribute('aria-valuenow', String(state.proofProgress))
+    }
+    if (track) track.style.width = state.proofProgress === null ? '35%' : `${state.proofProgress}%`
     if (labelElement) labelElement.textContent = label
-    if (percentElement) percentElement.textContent = `${state.proofProgress}%`
+    if (percentElement) percentElement.textContent = state.proofProgress === null ? '' : `${state.proofProgress}%`
 }
 
 async function connectWallet(): Promise<void> {

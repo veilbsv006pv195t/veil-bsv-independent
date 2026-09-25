@@ -10,6 +10,7 @@ if git ls-files --error-unmatch .private >/dev/null 2>&1; then
 fi
 
 if rg -n --hidden \
+  -g '!.git' \
   -g '!.git/**' \
   -g '!.private/**' \
   -g '!node_modules/**' \

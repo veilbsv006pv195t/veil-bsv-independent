@@ -1,7 +1,7 @@
+import { UnsignedEncoding } from '../../src/unsignedEncoding'
 import {
     bsv,
     hash256,
-    int2ByteString,
     PubKeyHash,
     Sha256,
     toByteString,
@@ -57,7 +57,7 @@ export interface PreparedLiveAction {
     }
 }
 
-export type BuilderProgress = (percent: number, label: string) => void
+export type BuilderProgress = (percent: number | null, label: string) => void
 
 interface FundingSplit {
     txid: string
@@ -206,7 +206,7 @@ function transitionFrom(built: BuiltTransition): V4Transition {
         publicOut: built.public.publicOut,
         recipientField: built.public.recipient,
         currentHeight: built.public.currentHeight,
-        recipientPkh: PubKeyHash(int2ByteString(built.public.recipient, 20n)),
+        recipientPkh: PubKeyHash(UnsignedEncoding.uint160(built.public.recipient)),
     }
 }
 
@@ -717,7 +717,9 @@ export class LiveVeilSession {
             }
         }
 
-        progress(16, 'Generating Groth16 proof in this browser')
+        // Validate canonical recipient bytes before doing expensive proof work.
+        const transition = transitionFrom(built)
+        progress(null, 'Generating Groth16 proof…')
         const { proof } = await groth16.fullProve(
             built.circuitInput,
             asset('shielded_pool.wasm'),
@@ -726,7 +728,6 @@ export class LiveVeilSession {
         progress(58, 'Preparing on-chain verifier witness')
         const converted = toScryptProof(proof as SnarkProof)
         const witness = buildPairingResidueWitness(built.statement, converted, this.vk)
-        const transition = transitionFrom(built)
         const sponsors = [
             action === 'shield' ? amount + 61_000 : 61_000,
             80_000, 75_000, 75_000, 75_000, 45_000, 21_000, 40_000,

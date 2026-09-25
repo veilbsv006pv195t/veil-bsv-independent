@@ -8,7 +8,7 @@ export interface ProofResult {
     elapsedMs: number
 }
 
-export type ProofProgress = (percent: number, label: string) => void
+export type ProofProgress = (percent: number | null, label: string) => void
 
 const proofAsset = (name: string): string => `${import.meta.env.BASE_URL}zk/${name}`
 
@@ -203,7 +203,7 @@ export async function proveAction(
     }
 
     const { wasm, provingKey } = await loadProofAssets(onProgress)
-    onProgress(86, 'Generating zero-knowledge proof')
+    onProgress(null, 'Generating Groth16 proof…')
     const started = performance.now()
     const { proof, publicSignals } = await groth16.fullProve(
         transition.circuitInput,

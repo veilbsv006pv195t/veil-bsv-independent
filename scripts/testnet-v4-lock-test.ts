@@ -1,10 +1,10 @@
+import { UnsignedEncoding } from '../src/unsignedEncoding'
 import { createHash as createNodeHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
     bsv,
     hash256,
-    int2ByteString,
     PubKeyHash,
     Sha256,
     toByteString,
@@ -185,7 +185,7 @@ function transitionFrom(built: BuiltTransition): V4Transition {
         publicOut: built.public.publicOut,
         recipientField: built.public.recipient,
         currentHeight: built.public.currentHeight,
-        recipientPkh: PubKeyHash(int2ByteString(built.public.recipient, 20n)),
+        recipientPkh: PubKeyHash(UnsignedEncoding.uint160(built.public.recipient)),
     }
 }
 

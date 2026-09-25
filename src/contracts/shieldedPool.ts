@@ -1,3 +1,4 @@
+import { UnsignedEncoding } from '../unsignedEncoding'
 import {
     assert,
     byteString2Int,
@@ -90,7 +91,7 @@ export class ShieldedPool extends SmartContract {
         statementBytes += int2ByteString(outputCommitment1, 32n)
         statementBytes += int2ByteString(publicIn, 8n)
         statementBytes += int2ByteString(publicOut, 8n)
-        statementBytes += int2ByteString(recipientField, 20n)
+        statementBytes += UnsignedEncoding.uint160(recipientField)
         statementBytes += int2ByteString(currentHeight, 4n)
         const digest = sha256(statementBytes)
         const statement = byteString2Int(
@@ -114,7 +115,7 @@ export class ShieldedPool extends SmartContract {
         // element inside the circuit statement.
         if (publicOut > 0n) {
             assert(
-                recipientPkh == int2ByteString(recipientField, 20n),
+                recipientPkh == UnsignedEncoding.uint160(recipientField),
                 'recipient does not match the proof'
             )
         } else {

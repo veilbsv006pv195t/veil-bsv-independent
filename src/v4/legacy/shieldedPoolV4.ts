@@ -1,4 +1,4 @@
-import { UnsignedEncoding } from '../unsignedEncoding'
+// Frozen pre-uint160-fix contract, used only to reproduce historical deployment evidence.
 import {
     assert,
     byteString2Int,
@@ -15,12 +15,12 @@ import {
     Utils,
 } from 'scrypt-ts'
 import { Proof } from 'scrypt-ts-lib/dist/zk/g16bn256'
-import { PairingResidueWitness } from '../optimizedGroth16'
+import { PairingResidueWitness } from '../../optimizedGroth16'
 import {
     V4PreparationState,
     V4State,
     V4Transition,
-} from './v4State'
+} from '../v4State'
 
 const STATEMENT_DOMAIN = 1447381314n
 const MAX_ABORT_DELAY = 144n
@@ -114,7 +114,7 @@ export class ShieldedPoolV4 extends SmartContract {
         statementBytes += int2ByteString(transition.outputCommitment1, 32n)
         statementBytes += int2ByteString(transition.publicIn, 8n)
         statementBytes += int2ByteString(transition.publicOut, 8n)
-        statementBytes += UnsignedEncoding.uint160(transition.recipientField)
+        statementBytes += int2ByteString(transition.recipientField, 20n)
         statementBytes += int2ByteString(transition.currentHeight, 4n)
         const digest = sha256(statementBytes)
         const signal = byteString2Int(

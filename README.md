@@ -43,7 +43,24 @@ The first clean run creates a fresh development ceremony and is intentionally
 CPU-intensive; `snarkjs powersoftau prepare phase2` may use all available CPU
 cores for several minutes. The fresh key proves independent source replay. The
 same command separately checks the committed deployment verification key
-against the exact v4 contract hashes that were mined on testnet.
+against the exact v4 contract hashes that were mined on testnet, using the frozen
+pre-fix sources under `src/v4/legacy/`. Those sources are for historical evidence
+replay only; they retain the old signed-recipient limitation.
+
+### Unsigned-recipient correction
+
+Current contracts encode the full unsigned 20-byte P2PKH hash, including hashes
+whose highest bit is set. The previous signed 20-byte conversion rejected that
+half of the address space. The circuit, statement layout, and proving key are
+unchanged; the pool and finalizer code (and therefore the verifier chain hashes)
+change. `npm run test:v4` exercises the compiled shield pipeline and withdrawal
+pipelines at both sides of the signed boundary, the regression address, and the
+maximum 160-bit value, including recipient-substitution rejection tests.
+
+Existing on-chain pools cannot be upgraded by replacing website files. Keep
+their original tab and private note state open. Recover their funds using the
+original contract and a compatible recipient before funding a corrected pool.
+The historical mined evidence does **not** attest to a deployment of this fix.
 
 See [`REPLAY_GUIDE.md`](REPLAY_GUIDE.md) for the short non-developer checklist
 and the exact success criteria.
@@ -98,6 +115,11 @@ until the reviewer checks the confirmation box and clicks the separate
 **Broadcast exact testnet chain** button. Submission is parent-first to ARC;
 network height, policy, and submission status are read directly from public
 testnet APIs, while the confirmed starting outpoint is bound into the envelope.
+
+While Groth16 runs, progress is indeterminate: “Generating Groth16 proof…”.
+The prover does not expose a measurable completion percentage. Numbered progress
+outside that stage represents preparation milestones, not an estimate of time
+remaining. Preparation failures remain visible and do not broadcast anything.
 
 Keep the tab open for the whole reviewer session. Private note state is
 deliberately kept in memory rather than persisted by the public site; reloading

@@ -1,3 +1,4 @@
+import { UnsignedEncoding } from '../src/unsignedEncoding'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import {
@@ -11,7 +12,6 @@ import path from 'node:path'
 import {
     bsv,
     hash256,
-    int2ByteString,
     PubKeyHash,
     Sha256,
     toByteString,
@@ -979,7 +979,7 @@ async function prepare(): Promise<void> {
         publicOut: transitionBuilt.public.publicOut,
         recipientField: transitionBuilt.public.recipient,
         currentHeight: transitionBuilt.public.currentHeight,
-        recipientPkh: PubKeyHash(int2ByteString(transitionBuilt.public.recipient, 20n)),
+        recipientPkh: PubKeyHash(UnsignedEncoding.uint160(transitionBuilt.public.recipient)),
     }
 
     const finalizer = new VeilV4Finalizer(
@@ -1351,7 +1351,7 @@ async function prepareTransfer(): Promise<void> {
         publicOut: transitionBuilt.public.publicOut,
         recipientField: transitionBuilt.public.recipient,
         currentHeight: transitionBuilt.public.currentHeight,
-        recipientPkh: PubKeyHash(int2ByteString(transitionBuilt.public.recipient, 20n)),
+        recipientPkh: PubKeyHash(UnsignedEncoding.uint160(transitionBuilt.public.recipient)),
     }
 
     const finalizer = new VeilV4Finalizer(

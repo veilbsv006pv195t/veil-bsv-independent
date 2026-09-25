@@ -1,9 +1,9 @@
+import { UnsignedEncoding } from '../src/unsignedEncoding'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
     bsv,
     hash256,
-    int2ByteString,
     PubKeyHash,
     Sha256,
     toByteString,
@@ -197,7 +197,20 @@ function expectReject(name: string, action: () => unknown, expected: string): vo
     console.log(`✓ ${name} rejected: ${expected}`)
 }
 
-async function main(): Promise<void> {
+function expectCompiledReject(current: any, tx: bsv.Transaction, sourceValue: number,
+    method: string, args: unknown[]): void {
+    current.to = { tx, inputIndex: 0 }
+    // Intentionally bypass TypeScript assertions for adversarial test inputs:
+    // the compiled covenant must reject them independently.
+    const unlocking = current.callDelegatedMethod(method, ...args).publicMethodCall.toScript()
+    const interpreter = new bsv.Script.Interpreter()
+    if (interpreter.verify(unlocking, current.lockingScript, tx, 0,
+        bsv.Script.Interpreter.DEFAULT_FLAGS, new bsv.crypto.BN(sourceValue))) {
+        throw new Error(`compiled ${method} accepted invalid recipient`)
+    }
+}
+
+async function runScenario(recipient?: bigint): Promise<void> {
     ShieldedPoolV4.loadArtifact('artifacts/src/v4/shieldedPoolV4.json')
     VeilV4Preparation.loadArtifact('artifacts/src/v4/veilV4Preparation.json')
     VeilV4Miller0.loadArtifact('artifacts/src/v4/veilV4Miller0.json')
@@ -207,17 +220,27 @@ async function main(): Promise<void> {
     VeilV4Finalizer.loadArtifact('artifacts/src/v4/veilV4Finalizer.json')
 
     const publicState = new PoolState(await createHash())
-    const built = publicState.build({
+    const deposit = publicState.build({
         mode: 0,
         publicIn: 1_000n,
         outputs: [{ amount: 1_000n, ownerKey: 101n, rho: 10_001n }],
     })
+    const built = recipient === undefined ? deposit : publicState.build({
+        mode: 2,
+        spend: { note: deposit.outputNotes[0] },
+        currentHeight: 900_000n,
+        publicOut: 500n,
+        recipient,
+        outputs: [{ amount: 500n, ownerKey: 101n, rho: 10_002n }],
+    })
+    const sourceValue = recipient === undefined ? 1 : 1_001
+    const nextValue = 1_001 - Number(built.public.publicOut)
     const jsonVkey = JSON.parse(await readFile(VKEY, 'utf8')) as SnarkVerificationKey
     const vk = toPreparedVerifyingKey(jsonVkey)
     const { proof } = await groth16.fullProve(built.circuitInput, WASM, ZKEY)
     const scryptProof = toScryptProof(proof as SnarkProof)
     const witness = buildPairingResidueWitness(built.statement, scryptProof, vk)
-    const recipientPkh = PubKeyHash(int2ByteString(built.public.recipient, 20n))
+    const recipientPkh = PubKeyHash(UnsignedEncoding.uint160(built.public.recipient))
     const transition: V4Transition = {
         oldNoteRoot: built.public.oldNoteRoot,
         oldNullifierRoot: built.public.oldNullifierRoot,
@@ -283,7 +306,7 @@ async function main(): Promise<void> {
     }
     const prep = prepTemplate
     prep.stateHash = V4State.hashPreparation(preparationState)
-    const beginTx = makeTx(pool, 1, prep.lockingScript, 1_001, Number(startHeight), 1_000)
+    const beginTx = makeTx(pool, sourceValue, prep.lockingScript, 1_001, Number(startHeight), Number(built.public.publicIn))
     beginTx.change(bsv.Address.fromPublicKeyHash(Buffer.alloc(20), bsv.Networks.testnet))
     const results: Array<{
         name: string
@@ -292,9 +315,25 @@ async function main(): Promise<void> {
         unlockingBytes: number
         transactionBytes: number
     }> = []
-    results.push({ name: 'begin', ...execute('begin', pool, beginTx, 1, (self) => self.begin(
+    results.push({ name: 'begin', ...execute('begin', pool, beginTx, sourceValue, (self) => self.begin(
         scryptProof, witness, transition, startHeight, abortHeight, prep.codePart, pool.codePart
     )) })
+
+    for (const invalidRecipient of [-1n, built.public.recipient + (1n << 160n)]) {
+        const invalidTransition = { ...transition, recipientField: invalidRecipient }
+        const invalidPreparation = { ...preparationState, context: {
+            ...preparationState.context, transitionHash: V4State.hashTransition(invalidTransition),
+        } }
+        prep.stateHash = V4State.hashPreparation(invalidPreparation)
+        const invalidBeginTx = makeTx(pool, sourceValue, prep.lockingScript, 1_001,
+            Number(startHeight), Number(built.public.publicIn))
+        invalidBeginTx.change(bsv.Address.fromPublicKeyHash(Buffer.alloc(20), bsv.Networks.testnet))
+        expectCompiledReject(pool, invalidBeginTx, sourceValue, 'begin', [
+            scryptProof, witness, invalidTransition, startHeight, abortHeight, prep.codePart, pool.codePart,
+        ])
+    }
+    prep.stateHash = V4State.hashPreparation(preparationState)
+    console.log('✓ compiled begin rejected negative and overflowing recipient fields')
 
     const q = BN256.makeAffineTwistPoint(BN256.createTwistPoint(scryptProof.b))
     const negA = { x: scryptProof.a.x, y: -scryptProof.a.y }
@@ -335,11 +374,63 @@ async function main(): Promise<void> {
     nextPool.noteRoot = transition.newNoteRoot
     nextPool.nullifierRoot = transition.newNullifierRoot
     nextPool.nextIndex = transition.newNextIndex
-    const finalTx = makeTx(current, 1_001, nextPool.lockingScript, 1_001)
+    const finalTx = makeTx(current, 1_001, nextPool.lockingScript, nextValue)
+    if (recipient !== undefined) {
+        finalTx.addOutput(new bsv.Transaction.Output({
+            script: bsv.Script.buildPublicKeyHashOut(
+                bsv.Address.fromPublicKeyHash(Buffer.from(recipientPkh, 'hex'), bsv.Networks.testnet)
+            ),
+            satoshis: 500,
+        }))
+    }
     finalTx.change(bsv.Address.fromPublicKeyHash(Buffer.alloc(20), bsv.Networks.testnet))
     results.push({ name: 'finalize', ...execute('finalize', current, finalTx, 1_001, (self) =>
         self.finalize(millerState, transition, pool.codePart)
     ) })
+
+    if (recipient !== undefined) {
+        // Reuse the exact valid unlocking script against a transaction paying
+        // another address. This checks compiled Script, not only JS assertions.
+        const wrongTx = makeTx(current, 1_001, nextPool.lockingScript, nextValue)
+        const wrongPkh = Buffer.from(UnsignedEncoding.uint160(recipient ^ 1n), 'hex')
+        wrongTx.addOutput(new bsv.Transaction.Output({
+            script: bsv.Script.buildPublicKeyHashOut(bsv.Address.fromPublicKeyHash(wrongPkh, bsv.Networks.testnet)),
+            satoshis: 500,
+        }))
+        wrongTx.change(bsv.Address.fromPublicKeyHash(Buffer.alloc(20), bsv.Networks.testnet))
+        const interpreter = new bsv.Script.Interpreter()
+        if (interpreter.verify(finalTx.inputs[0].script, current.lockingScript, wrongTx, 0,
+            bsv.Script.Interpreter.DEFAULT_FLAGS, new bsv.crypto.BN(1_001))) {
+            throw new Error('compiled finalizer accepted a substituted recipient output')
+        }
+        console.log('✓ compiled finalizer rejected substituted recipient output')
+
+        // Even a recomputed state commitment cannot bypass the proof-bound
+        // recipientField / recipientPkh equality check.
+        const wrongTransition = { ...transition, recipientPkh: PubKeyHash(wrongPkh.toString('hex')) }
+        const wrongState = { ...millerState, context: {
+            ...millerState.context, transitionHash: V4State.hashTransition(wrongTransition),
+        } }
+        current.stateHash = V4State.hashMiller(wrongState)
+        // Refresh the prevout script after changing the committed state.
+        wrongTx.inputs[0].output = new bsv.Transaction.Output({ script: current.lockingScript, satoshis: 1_001 })
+        expectCompiledReject(current, wrongTx, 1_001, 'finalize', [wrongState, wrongTransition, pool.codePart])
+        expectReject('recipient differs from proved field', () => {
+            current.to = { tx: wrongTx, inputIndex: 0 }
+            current.getUnlockingScript((self: VeilV4Finalizer) => self.finalize(wrongState, wrongTransition, pool.codePart))
+        }, 'recipient does not match proof')
+        for (const invalidRecipient of [-1n, recipient + (1n << 160n)]) {
+            const invalidTransition = { ...transition, recipientField: invalidRecipient }
+            const invalidState = { ...millerState, context: {
+                ...millerState.context, transitionHash: V4State.hashTransition(invalidTransition),
+            } }
+            current.stateHash = V4State.hashMiller(invalidState)
+            finalTx.inputs[0].output = new bsv.Transaction.Output({ script: current.lockingScript, satoshis: 1_001 })
+            expectCompiledReject(current, finalTx, 1_001, 'finalize', [invalidState, invalidTransition, pool.codePart])
+        }
+        console.log('✓ compiled finalizer rejected negative and overflowing recipient fields')
+        current.stateHash = V4State.hashMiller(millerState)
+    }
 
     const wrongCodeTx = makeTx(prep, 1_001, s1Template.lockingScript, 1_001)
     expectReject('substituted successor code', () => {
@@ -432,7 +523,7 @@ async function main(): Promise<void> {
     })
     console.log('✓ timeout recovery restored the prior pool state at the committed height')
 
-    console.log('✓ complete v4 shield pipeline accepted by Bitcoin Script')
+    console.log(`✓ complete v4 ${recipient === undefined ? 'shield' : `withdraw recipient=0x${recipient.toString(16)}`} pipeline accepted by Bitcoin Script`)
     for (const result of results) {
         console.log(
             `  ${result.name.padEnd(10)} ${result.seconds.toFixed(3)}s, ` +
@@ -441,6 +532,17 @@ async function main(): Promise<void> {
             `max Script number ${result.maximumScriptNumber.toLocaleString()} B`
         )
     }
+}
+
+async function main(): Promise<void> {
+    await runScenario()
+    // Low-half boundary, first high-half hash, the reported failure, and all bits set.
+    for (const recipient of [
+        (1n << 159n) - 1n,
+        1n << 159n,
+        0xac8f16aa9626b09c7ed8ca6f5fffd82282736418n,
+        (1n << 160n) - 1n,
+    ]) await runScenario(recipient)
 }
 
 main().then(

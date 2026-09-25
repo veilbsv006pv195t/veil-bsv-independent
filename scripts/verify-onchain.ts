@@ -1,8 +1,8 @@
+import { UnsignedEncoding } from '../src/unsignedEncoding'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
     bsv,
-    int2ByteString,
     PubKeyHash,
     Utils,
 } from 'scrypt-ts'
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
     next.nullifierRoot = transition.public.newNullifierRoot
     next.nextIndex = transition.public.newNextIndex
 
-    const recipientPkh = PubKeyHash(int2ByteString(recipientField, 20n))
+    const recipientPkh = PubKeyHash(UnsignedEncoding.uint160(recipientField))
     const sourceOutput = new bsv.Transaction.Output({
         script: current.lockingScript,
         satoshis: 1_001,

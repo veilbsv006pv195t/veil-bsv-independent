@@ -10,7 +10,7 @@
     "build:circuit": "node --import tsx scripts/build-circuit.ts",
     "build:contract": "scrypt-cli compile",
     "build:v4": "scrypt-cli compile -i src/v4/shieldedPoolV4.ts && scrypt-cli compile -i 'src/v4/veilV4*.ts' && node --import tsx scripts/build-v4-chain.ts",
-    "verify:v4:deployed": "node --import tsx scripts/build-v4-chain.ts --vkey=evidence/deployed-verification-key.json --expect=evidence/deployed-v4-chain-manifest.json",
+    "verify:v4:deployed": "scrypt-cli compile -i src/v4/legacy/shieldedPoolV4.ts && scrypt-cli compile -i src/v4/legacy/veilV4Finalizer.ts && node --import tsx scripts/build-v4-chain.ts --legacy --vkey=evidence/deployed-verification-key.json --expect=evidence/deployed-v4-chain-manifest.json --out=artifacts/v4/legacy-chain-manifest.json",
     "build": "npm run build:circuit && npm run build:contract",
     "bounty:replay": "npm run build:circuit && npm run build:v4 && npm run verify:v4:deployed && npm run demo && npm run test:v4 && npm test && npm run typecheck && npm run build:ui",
     "release:check": "bash scripts/release-check.sh",

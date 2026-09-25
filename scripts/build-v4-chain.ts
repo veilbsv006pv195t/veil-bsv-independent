@@ -5,13 +5,20 @@ import path from 'node:path'
 import { Sha256, toByteString } from 'scrypt-ts'
 import { SnarkVerificationKey } from '../src/groth16'
 import { toPreparedVerifyingKey } from '../src/optimizedGroth16Data'
-import { VeilV4Finalizer } from '../src/v4/veilV4Finalizer'
+import { VeilV4Finalizer as CurrentFinalizer } from '../src/v4/veilV4Finalizer'
+import { VeilV4Finalizer as LegacyFinalizer } from '../src/v4/legacy/veilV4Finalizer'
 import { VeilV4Miller0 } from '../src/v4/veilV4Miller0'
 import { VeilV4Miller1 } from '../src/v4/veilV4Miller1'
 import { VeilV4Miller2 } from '../src/v4/veilV4Miller2'
 import { VeilV4Miller3 } from '../src/v4/veilV4Miller3'
 import { VeilV4Preparation } from '../src/v4/veilV4Preparation'
-import { ShieldedPoolV4 } from '../src/v4/shieldedPoolV4'
+import { ShieldedPoolV4 as CurrentPool } from '../src/v4/shieldedPoolV4'
+import { ShieldedPoolV4 as LegacyPool } from '../src/v4/legacy/shieldedPoolV4'
+
+// Historical evidence stays bound to the original, immutable on-chain code.
+const legacy = process.argv.includes('--legacy')
+const VeilV4Finalizer = legacy ? LegacyFinalizer : CurrentFinalizer
+const ShieldedPoolV4 = legacy ? LegacyPool : CurrentPool
 
 function option(name: string, fallback: string): string {
     const prefix = `--${name}=`
@@ -37,13 +44,13 @@ function size(instance: { lockingScript: { toBuffer(): Buffer }; codePart: strin
 }
 
 async function main(): Promise<void> {
-    VeilV4Finalizer.loadArtifact('artifacts/src/v4/veilV4Finalizer.json')
+    VeilV4Finalizer.loadArtifact(`artifacts/src/v4/${legacy ? 'legacy/' : ''}veilV4Finalizer.json`)
     VeilV4Miller0.loadArtifact('artifacts/src/v4/veilV4Miller0.json')
     VeilV4Miller1.loadArtifact('artifacts/src/v4/veilV4Miller1.json')
     VeilV4Miller2.loadArtifact('artifacts/src/v4/veilV4Miller2.json')
     VeilV4Miller3.loadArtifact('artifacts/src/v4/veilV4Miller3.json')
     VeilV4Preparation.loadArtifact('artifacts/src/v4/veilV4Preparation.json')
-    ShieldedPoolV4.loadArtifact('artifacts/src/v4/shieldedPoolV4.json')
+    ShieldedPoolV4.loadArtifact(`artifacts/src/v4/${legacy ? 'legacy/' : ''}shieldedPoolV4.json`)
 
     const jsonVkey = JSON.parse(
         await readFile(VKEY, 'utf8')

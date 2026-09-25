@@ -1,3 +1,4 @@
+import { UnsignedEncoding } from '../src/unsignedEncoding'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import {
@@ -10,7 +11,6 @@ import {
 import path from 'node:path'
 import {
     bsv,
-    int2ByteString,
     PubKeyHash,
 } from 'scrypt-ts'
 import { groth16 } from 'snarkjs'
@@ -453,7 +453,7 @@ function buildTransitionTx(
     tx.fee(TRANSITION_FEE)
     tx.change(wallet.address)
     current.to = { tx, inputIndex: 0 }
-    const pkh = PubKeyHash(int2ByteString(transition.public.recipient, 20n))
+    const pkh = PubKeyHash(UnsignedEncoding.uint160(transition.public.recipient))
     const residueWitness = buildPairingResidueWitness(
         transition.statement,
         proof,
