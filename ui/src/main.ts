@@ -167,6 +167,11 @@ function render(): void {
         </header>
 
         <main>
+          <aside class="version-notice" aria-label="Version information">
+            <strong>v0.3.0 · Two-wallet testnet candidate</strong>
+            <span>New protocol; do not import old pool notes. No contract is deployed merely by opening this page.</span>
+            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/" target="_blank" rel="noopener noreferrer">Open previous version for comparison ↗</a>
+          </aside>
           <section class="hero-copy">
             <div class="privacy-pill">${icons.lock} Zero-knowledge privacy</div>
             <h1>Veil your BSV</h1>
