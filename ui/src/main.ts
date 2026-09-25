@@ -8,6 +8,7 @@ import { recipientIdentity, RECIPIENT_PROTOCOL, type EncryptedPayment } from '..
 import { encryptBackup, decryptBackup, type WalletBackup } from '../../src/walletBackup'
 import { GuidedDemo, GUIDED_FORMAT, GUIDED_MARKER, otherRole, type Role } from './guided-demo'
 import { fetchUsdQuote, mainnetUsd, isFresh, type UsdQuote } from './usd-price'
+import { canUnlockOriginalWallet } from './wallet-entry-guard'
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
 type Theme = 'light' | 'dark'
@@ -375,6 +376,7 @@ function liveDialog(): string {
         ` : `
           <h3>Returning user — restore your backup</h3>
           <p>Already used Veil? Restore your latest encrypted wallet backup here. Enter its backup passphrase first, then choose the file to restore. Do not select an encrypted payment file.</p>
+          ${hasGuidedMarker() ? '<p role="status">An existing guided setup was detected. First-time unlock is disabled; restore your latest two-wallet backup in this section.</p>' : ''}
           <label class="field-label" for="restore-password">Backup passphrase</label>
           <div class="text-field"><input id="restore-password" type="password" autocomplete="current-password" /></div>
           <label class="live-confirm"><input id="guided-demo-choice" type="checkbox" ${state.guidedRequested ? 'checked' : ''} /> Guided demo: create a separate recipient on first setup</label>
@@ -383,9 +385,9 @@ function liveDialog(): string {
           <h3 class="setup-divider">First-time setup only</h3>
           <p>The separately delivered live-wallet password opens the original funding wallet, not your saved private notes. If you have used it already, restore above instead. Wallet data is decrypted locally; passwords are never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
           <label class="field-label" for="live-password">First-time live-wallet password</label>
-          <div class="text-field"><input id="live-password" type="password" autocomplete="current-password" spellcheck="false" /></div>
-          <button class="primary-button" id="unlock-live-wallet" ${state.liveUnlocking ? 'disabled' : ''}>
-            ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : 'First-time unlock →'}
+          <div class="text-field"><input id="live-password" type="password" autocomplete="current-password" spellcheck="false" ${walletUnlockAllowed() ? '' : 'disabled'} /></div>
+          <button class="primary-button" id="unlock-live-wallet" ${walletUnlockAllowed() ? '' : 'disabled'}>
+            ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : state.busy ? 'Wallet operation in progress…' : hasGuidedMarker() ? 'Restore required — use backup above' : 'First-time unlock →'}
           </button>
           <button class="secondary-button" id="create-receiving-wallet">Create independent receiving wallet</button>
         `}
@@ -416,6 +418,14 @@ function updateUsdDisplay(): void {
 
 function rememberGuided(): void {
     try { localStorage.setItem(GUIDED_MARKER, 'restore-backup-required') } catch { /* No secrets or addresses in storage. */ }
+}
+function walletUnlockAllowed(): boolean {
+    return canUnlockOriginalWallet({
+        busy: state.busy, unlocking: state.liveUnlocking,
+        hasWallet: Boolean(state.liveSession || state.receivingWallet || state.guided),
+        pendingPlan: Boolean(state.pendingLivePlan), checkingHandoff: state.guidedPolling,
+        restoreRequired: hasGuidedMarker(),
+    })
 }
 function hasGuidedMarker(): boolean {
     try { return localStorage.getItem(GUIDED_MARKER) !== null } catch { return false }
@@ -573,7 +583,7 @@ async function connectWallet(): Promise<void> {
 }
 
 async function unlockBrowserWallet(): Promise<void> {
-    if (state.liveUnlocking || state.busy || state.guidedPolling) return
+    if (!walletUnlockAllowed()) return
     const input = document.querySelector<HTMLInputElement>('#live-password')
     let password = input?.value ?? ''
     if (input) input.value = ''
