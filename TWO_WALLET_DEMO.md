@@ -31,9 +31,13 @@ means a new verifier chain and pool deployment. Legacy replay stays separate.
    costs roughly 431,000 testnet sats, plus initial deployment if applicable;
    the exact review screen is authoritative.
 4. In A, unlock the disposable funded wallet (or create another independent
-   wallet). Under **Bind a mined funding output**, enter the public raw funding
-   transaction and its output index. It must pay A's testnet address and still
-   be unspent. Click **Prepare a fresh pool**. This does not broadcast.
+   wallet). A published encrypted wallet may include its public funding
+   transaction: unlocking then checks its TXID, amount, wallet ownership and
+   ARC's mined status automatically, and displays the exact outpoint. Otherwise,
+   under **Bind a mined funding output**, enter the public raw funding transaction
+   and its output index. The output must still be unspent; mining alone does not
+   establish that. Do not spend from the same funded wallet in an older tab.
+   Click **Prepare a fresh pool**. This does not broadcast.
 5. Save backups outside the browser. Do not share a wallet backup or its
    passphrase as a payment. The encrypted payment file is a different file.
 

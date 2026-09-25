@@ -30,6 +30,8 @@ interface EncryptedWallet {
     }
     iv: string
     ciphertext: string
+    /** Optional public funding transaction; never contains wallet secrets. */
+    fundingTransaction?: string
 }
 
 const WALLET_PATH = 'live-wallet/encrypted-wallet.json'
@@ -66,7 +68,12 @@ function validateEnvelope(value: unknown): EncryptedWallet {
         typeof wallet.iv !== 'string' ||
         typeof wallet.ciphertext !== 'string' ||
         typeof wallet.address !== 'string' ||
-        !validFunding(wallet.funding)
+        !validFunding(wallet.funding) ||
+        (wallet.fundingTransaction !== undefined && (
+            typeof wallet.fundingTransaction !== 'string' ||
+            wallet.fundingTransaction.length > 22_000_000 ||
+            !/^(?:[0-9a-f]{2})+$/.test(wallet.fundingTransaction)
+        ))
     ) throw new Error('The encrypted wallet uses an unsupported format')
     return wallet as EncryptedWallet
 }
@@ -121,7 +128,7 @@ export function validateReceivingWallet(value: LiveWallet): LiveWallet {
     return validateWallet(value, value?.address, value?.funding)
 }
 
-export async function unlockLiveWallet(password: string): Promise<LiveWallet> {
+export async function unlockLiveWallet(password: string): Promise<{ wallet: LiveWallet; fundingChecked: boolean }> {
     if (!password) throw new Error('Enter the live-wallet password')
     const response = await fetch(new URL(WALLET_PATH, document.baseURI), { cache: 'no-store' })
     if (response.status === 404) throw new Error('The encrypted live wallet has not been published yet')
@@ -165,9 +172,22 @@ export async function unlockLiveWallet(password: string): Promise<LiveWallet> {
     } catch {
         throw new Error('That password did not unlock the live wallet')
     }
-    return validateWallet(
-        JSON.parse(new TextDecoder().decode(cleartext)),
-        envelope.address,
-        envelope.funding
-    )
+    let wallet: LiveWallet
+    try {
+        wallet = validateWallet(
+            JSON.parse(new TextDecoder().decode(cleartext)),
+            envelope.address,
+            envelope.funding
+        )
+    } finally {
+        new Uint8Array(cleartext).fill(0)
+    }
+    if (envelope.fundingTransaction === undefined) return { wallet, fundingChecked: false }
+    const { checkedFunding } = await import('./live-funding')
+    const funding = await checkedFunding(envelope.fundingTransaction, wallet.funding.vout, wallet.address)
+    if (funding.txid !== wallet.funding.txid.toLowerCase() || funding.satoshis !== wallet.funding.satoshis) {
+        throw new Error('The published funding transaction does not match the encrypted wallet')
+    }
+    // MINED confirms inclusion, not current unspent status. The UI states this limitation.
+    return { wallet, fundingChecked: true }
 }

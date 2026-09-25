@@ -159,7 +159,7 @@ function render(): void {
             <button class="wallet-button" id="connect-wallet">
               ${live
                   ? '<span class="wallet-dot"></span> Live testnet unlocked'
-                  : state.receivingWallet ? 'Receiving wallet ready' : state.connected
+                  : state.receivingWallet ? (state.fundingChecked ? 'Funded wallet unlocked' : 'Receiving wallet ready') : state.connected
                     ? '<span class="wallet-dot"></span> Wallet connected'
                     : 'Unlock live testnet'}
             </button>
@@ -198,7 +198,7 @@ function render(): void {
               </div>
 
               <div class="balance-footer">
-                <div><span>${live ? 'Tracked fee-funding output' : 'Available in wallet'}</span><strong>${formatSats(state.publicBalance)} sats</strong></div>
+                <div><span>${live || state.receivingWallet ? 'Tracked fee-funding output' : 'Available in wallet'}</span><strong>${formatSats(state.publicBalance)} sats</strong></div>
                 ${state.connected
                     ? '<span class="demo-label">WALLET</span>'
                     : `<button class="demo-label" data-run-demo ${state.demoRunning || state.busy ? 'disabled' : ''}>${state.demoRunning ? 'RUNNING' : 'DEMO'}</button>`}
@@ -323,9 +323,13 @@ function liveDialog(): string {
         ${state.liveSession || state.receivingWallet ? `
           <p>Private keys and notes stay in this tab and your encrypted backup. Keep both the backup file and its passphrase safe. Never reload during preparation or a partially submitted chain.</p>
           <div class="unlocked-address"><span>Testnet address</span><strong>${escapeHtml(state.liveAddress)}</strong></div>
+          ${!state.liveSession && state.receivingWallet && state.fundingChecked ? `
+            <div class="unlocked-address"><span>Mined fee-funding output · ${formatSats(state.receivingWallet.funding.satoshis)} sats</span><strong class="wrap-address">${state.receivingWallet.funding.txid}:${state.receivingWallet.funding.vout}</strong></div>
+            <p>Funding transaction and wallet ownership checked. Mining does not prove this output is still unspent. Do not spend from this wallet in another tab or browser.</p>
+          ` : ''}
           <div class="unlocked-address"><span>Veil v2 receiving address · share this, never your backup</span><strong class="wrap-address">${escapeHtml(state.receivingAddress)}</strong></div>
           <button class="secondary-button" id="copy-receiving-address">Copy receiving address</button>
-          <p>${state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
+          <p>${state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : state.fundingChecked ? 'Funded wallet ready. Save its encrypted backup, then prepare a fresh pool. Preparation does not broadcast; the exact transactions require a separate review.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
           <button class="secondary-button" id="save-wallet-backup">Download encrypted wallet backup${state.backupDirty ? ' · required' : ''}</button>
@@ -443,13 +447,13 @@ async function unlockBrowserWallet(): Promise<void> {
     state.liveError = ''
     render()
     try {
-        const wallet = await unlockLiveWallet(password)
+        const { wallet, fundingChecked } = await unlockLiveWallet(password)
         password = ''
         const height = await testnetHeight()
         state.receivingWallet = wallet
         state.liveAddress = wallet.address
         state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
-        state.fundingChecked = false
+        state.fundingChecked = fundingChecked
         state.backupDirty = true
         state.connected = true
         state.publicBalance = wallet.funding.satoshis

@@ -15,6 +15,7 @@ build/recipient/
 .DS_Store
 coverage/
 ui/public/zk/
+ui/public/live-wallet/
 release/*.zip
 release/*.zip.sha256
 .private/
