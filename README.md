@@ -47,11 +47,39 @@ against the exact v4 contract hashes that were mined on testnet, using the froze
 pre-fix sources under `src/v4/legacy/`. Those sources are for historical evidence
 replay only; they retain the old signed-recipient limitation.
 
+### Recipient-owned two-wallet upgrade (local release candidate)
+
+The live builder now uses a separate recipient-owned circuit and new verification
+key. A receiving address contains a public owner identifier, **not** the spending
+secret. Even though the sender constructs a note, spending it requires the
+recipient's secret preimage inside the proof. The legacy circuit remains for
+historical replay; its proofs and mined evidence do not establish that this new
+version has been deployed.
+
+The static site supports independent receiving wallets, authenticated encrypted
+payment files, encrypted wallet backups, and explicit public pool updates. There
+is no relayer, automatic inbox, automatic discovery, or concurrent-wallet
+coordination service. See [TWO_WALLET_DEMO.md](TWO_WALLET_DEMO.md) for the exact
+serverless handoff and limitations. This development ceremony and prototype are
+**testnet only, not production-audited**.
+
+```bash
+npm run build:circuit:recipient
+npm run test:recipient
+npm run test:v4:recipient
+npm run sync:ui-artifacts
+npm run test:two-wallet
+```
+
+`test:two-wallet` executes the real browser transaction builder, proofs,
+signatures, and Script interpreter. All network responses are synthetic fixtures;
+it never broadcasts and is not evidence of a live deployment.
+
 ### Unsigned-recipient correction
 
 Current contracts encode the full unsigned 20-byte P2PKH hash, including hashes
 whose highest bit is set. The previous signed 20-byte conversion rejected that
-half of the address space. The circuit, statement layout, and proving key are
+half of the address space. For that correction alone, the circuit, statement layout, and proving key are
 unchanged; the pool and finalizer code (and therefore the verifier chain hashes)
 change. `npm run test:v4` exercises the compiled shield pipeline and withdrawal
 pipelines at both sides of the signed boundary, the regression address, and the
@@ -73,6 +101,7 @@ does **not** broadcast or spend funds. Developers can run it locally with:
 
 ```bash
 npm run build:circuit
+npm run build:circuit:recipient
 npm run dev:ui
 ```
 
@@ -121,17 +150,20 @@ The prover does not expose a measurable completion percentage. Numbered progress
 outside that stage represents preparation milestones, not an estimate of time
 remaining. Preparation failures remain visible and do not broadcast anything.
 
-Keep the tab open for the whole reviewer session. Private note state is
-deliberately kept in memory rather than persisted by the public site; reloading
-after a broadcast retires that one-session reviewer wallet flow.
+Keep the tab open throughout proof preparation and submission. Download an
+updated encrypted backup after each completed action. Restoring a completed
+pool backup requires its finalizer to be mined. A partially submitted chain is
+not resumable from an earlier backup: preserve the original tab and its signed
+plan. Do not reload or clear it in that state.
 
 The password is not a spending policy. Anyone who knows it can recover the
 disposable WIF from browser memory and control all of that wallet's testnet
 coins. Retire the password and remove the encrypted envelope after review.
-Never use this mode with mainnet funds. The current **Send** action demonstrates
-a private nullifier-and-new-note transfer back to a fresh note controlled by the
-same disposable reviewer wallet; interoperable recipient note delivery remains
-out of scope, as documented below.
+Never use this mode with mainnet funds. In this release candidate, **Send** takes
+another wallet's complete `veilt2` address and removes the sent amount from the
+sender's balance. Deliver the downloaded encrypted payment file to that recipient
+after mining. This is a versioned Veil-specific format, not an interoperable
+third-party wallet standard.
 
 ## Independent live testnet operator
 
@@ -319,7 +351,8 @@ This is bounty-grade, auditable proof-of-concept code—not production money sof
   improves miner-policy compatibility at the cost of latency, fees, and
   intermediate state. Production submission should send the dependency chain
   parent-first and reconcile every TXID on an uncertain response.
-- Notes are not yet encrypted for recipient discovery; the demo assumes note plaintext is delivered out of band.
+- Historical replay delivers note plaintext out of band. The recipient-owned
+  candidate encrypts payment files, but discovery and delivery remain manual.
 - No security audit has been performed. Do not use real funds.
 
 See [SECURITY.md](SECURITY.md) before extending or deploying the protocol.

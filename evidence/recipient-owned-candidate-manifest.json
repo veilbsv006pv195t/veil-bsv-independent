@@ -1,0 +1,68 @@
+{
+  "format": "veil-v4-recipient-owned-verifier-chain-v2",
+  "protocol": "veil-recipient-v2-testnet",
+  "verificationKeySha256": "8bccc7aad0c90a15ff10f7cd3f2d46383d130c09d23957c8bbc1e773d4644eb7",
+  "circuitSha256": "8bba42756d4fd7abb893f37ee05790bd4129f08165edf5e4026feeb4e08654a7",
+  "deploymentStatus": "not-deployed-local-candidate",
+  "generatedAt": "2026-09-25T12:07:24.094Z",
+  "policyTargetBytes": 500000,
+  "preparedLineRanges": {
+    "stage0": [
+      0,
+      23
+    ],
+    "stage1": [
+      23,
+      44
+    ],
+    "stage2": [
+      44,
+      67
+    ],
+    "stage3": [
+      67,
+      89
+    ],
+    "finalizer": [
+      89,
+      91
+    ]
+  },
+  "contracts": {
+    "pool": {
+      "lockingScriptBytes": 12501,
+      "codePartBytes": 12427,
+      "codePartHash256": "d2fde14a141aa45cc841477b713fce0707ed873d3d74c72397881352e1958993"
+    },
+    "preparation": {
+      "lockingScriptBytes": 248380,
+      "codePartBytes": 248341,
+      "codePartHash256": "5a932b6eff77db71c5496a857dbd3b9e6542a3116c6cd0bac9d40c9870fc3ac7"
+    },
+    "stage0": {
+      "lockingScriptBytes": 234269,
+      "codePartBytes": 234230,
+      "codePartHash256": "5abbe0aa509ee5bde79d5d81f6f53e6365a6f75d967642003ab825966f905c6e"
+    },
+    "stage1": {
+      "lockingScriptBytes": 215583,
+      "codePartBytes": 215544,
+      "codePartHash256": "fc45beb3f9d6725f0a126ae35afd50871805ab369d1d7f2927353a9694ae04a9"
+    },
+    "stage2": {
+      "lockingScriptBytes": 234271,
+      "codePartBytes": 234232,
+      "codePartHash256": "c147a06f4a3b4c4bc02d9ec6e26b81328120deb14a3a1b8b63bb846f4f4c7bcf"
+    },
+    "stage3": {
+      "lockingScriptBytes": 224936,
+      "codePartBytes": 224897,
+      "codePartHash256": "41942287fb0a50ce1ddd16c648a8759bae9bad3eb85f063217f6d0bca7455a07"
+    },
+    "finalizer": {
+      "lockingScriptBytes": 70867,
+      "codePartBytes": 70828,
+      "codePartHash256": "ce411cc43b1cddded1a0f65e99e7ca23529bcc785a87eed38914753a297acad2"
+    }
+  }
+}

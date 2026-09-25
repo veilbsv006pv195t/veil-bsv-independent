@@ -71,7 +71,7 @@ function validateEnvelope(value: unknown): EncryptedWallet {
     return wallet as EncryptedWallet
 }
 
-function validateWallet(
+export function validateWallet(
     value: unknown,
     publicAddress: string,
     publicFunding: LiveWallet['funding']
@@ -100,6 +100,25 @@ function validateWallet(
         key.toAddress(bsv.Networks.testnet).toString() !== wallet.address
     ) throw new Error('The decrypted key does not match the published testnet address')
     return wallet as LiveWallet
+}
+
+export function createReceivingWallet(): LiveWallet {
+    const key = bsv.PrivateKey.fromRandom(bsv.Networks.testnet)
+    return {
+        format: 'veil-live-wallet-v1', network: 'testnet',
+        wif: key.toWIF(), address: key.toAddress(bsv.Networks.testnet).toString(),
+        funding: { txid: '0'.repeat(64), vout: 0, satoshis: 0 },
+        createdAt: new Date().toISOString(),
+    }
+}
+
+export function validateReceivingWallet(value: LiveWallet): LiveWallet {
+    // An unfunded receiver may accept notes but cannot pay miner fees yet.
+    if (value?.funding?.satoshis === 0 && value.funding.txid === '0'.repeat(64) && value.funding.vout === 0) {
+        validateWallet({ ...value, funding: { ...value.funding, satoshis: 1 } }, value.address, { ...value.funding, satoshis: 1 })
+        return value
+    }
+    return validateWallet(value, value?.address, value?.funding)
 }
 
 export async function unlockLiveWallet(password: string): Promise<LiveWallet> {

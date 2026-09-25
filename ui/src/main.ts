@@ -2,7 +2,10 @@ import './styles.css'
 import { proveAction } from './prover'
 import type { LiveVeilSession, PreparedLiveAction } from './live-builder'
 import { broadcastRawTransaction, explorerUrl, testnetHeight } from './live-network'
-import { unlockLiveWallet } from './live-wallet'
+import { unlockLiveWallet, createReceivingWallet, validateReceivingWallet, type LiveWallet } from './live-wallet'
+import { createHash } from '../../src/crypto'
+import { recipientIdentity, RECIPIENT_PROTOCOL, type EncryptedPayment } from '../../src/recipient'
+import { encryptBackup, decryptBackup, type WalletBackup } from '../../src/walletBackup'
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
 type Theme = 'light' | 'dark'
@@ -57,6 +60,10 @@ const state = {
     connected: false,
     liveSession: null as LiveVeilSession | null,
     liveAddress: '',
+    receivingAddress: '',
+    receivingWallet: null as LiveWallet | null,
+    backupDirty: false,
+    fundingChecked: false,
     liveDialogOpen: false,
     liveUnlocking: false,
     liveConfirm: false,
@@ -98,7 +105,7 @@ const copy = {
         description: 'The recipient and amount stay hidden. Only a proof appears on-chain.',
         recipient: true,
         recipientLabel: 'Recipient’s Veil address',
-        recipientPlaceholder: 'veil1…',
+        recipientPlaceholder: 'veilt2… (complete recipient address)',
         cta: 'Send privately',
     },
     lock: {
@@ -131,9 +138,9 @@ function render(): void {
     const active = copy[state.action]
     const max = state.action === 'shield' ? state.publicBalance : state.privateBalance
     const live = state.liveSession !== null
-    const needsRecipient = active.recipient && !(live && state.action === 'send')
+    const needsRecipient = active.recipient
     const actionDescription = live && state.action === 'send'
-        ? 'Moves value through a nullifier into a fresh private note controlled by this disposable testnet wallet.'
+        ? 'Send to another wallet’s Veil v2 address. After mining, deliver the encrypted payment file. Only that recipient can spend the note. No automatic delivery or discovery.'
         : active.description
     document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <div class="shell">
@@ -152,7 +159,7 @@ function render(): void {
             <button class="wallet-button" id="connect-wallet">
               ${live
                   ? '<span class="wallet-dot"></span> Live testnet unlocked'
-                  : state.connected
+                  : state.receivingWallet ? 'Receiving wallet ready' : state.connected
                     ? '<span class="wallet-dot"></span> Wallet connected'
                     : 'Unlock live testnet'}
             </button>
@@ -181,12 +188,12 @@ function render(): void {
               </div>
 
               <div class="address-card">
-                <div><span>Your private address</span><strong>veil1qx7k…8f4n</strong></div>
+                <div><span>Your private address</span><strong>${state.receivingAddress ? escapeHtml(shortProof(state.receivingAddress)) : 'Local demo only'}</strong></div>
                 <button id="copy-address" aria-label="Copy private address">${icons.copy}</button>
               </div>
 
               <div class="balance-footer">
-                <div><span>Available in wallet</span><strong>${formatSats(state.publicBalance)} sats</strong></div>
+                <div><span>${live ? 'Tracked fee-funding output' : 'Available in wallet'}</span><strong>${formatSats(state.publicBalance)} sats</strong></div>
                 ${state.connected
                     ? '<span class="demo-label">WALLET</span>'
                     : `<button class="demo-label" data-run-demo ${state.demoRunning || state.busy ? 'disabled' : ''}>${state.demoRunning ? 'RUNNING' : 'DEMO'}</button>`}
@@ -261,7 +268,7 @@ function render(): void {
           </section>
         </main>
 
-        <footer><span>${live
+        <footer><span>${state.receivingWallet ? 'INDEPENDENT TESTNET WALLET · Import a payment or bind funding to prepare a new pool.' : live
             ? 'LIVE TESTNET MODE · Every signed transaction requires review before broadcast.'
             : 'Real proofs, local demo state. No transaction is broadcast.'}</span><span>Source included with release</span></footer>
         <div class="toast" id="toast" role="status"></div>
@@ -285,7 +292,7 @@ function liveDialog(): string {
               <div><span>Amount</span><strong>${formatSats(plan.amount)} sats</strong></div>
               <div><span>Total miner fees</span><strong>${formatSats(plan.totalFees)} sats</strong></div>
               <div><span>Transactions</span><strong>${plan.transactions.length}</strong></div>
-              ${plan.recipient ? `<div class="wide"><span>Public recipient</span><strong>${escapeHtml(plan.recipient)}</strong></div>` : ''}
+              ${plan.recipient ? `<div class="wide"><span>${plan.action === 'send' ? 'Private recipient · encrypted file handoff required' : 'Public recipient'}</span><strong>${escapeHtml(plan.recipient)}</strong></div>` : ''}
               ${plan.unlockHeight ? `<div class="wide"><span>Unlock height</span><strong>${formatSats(plan.unlockHeight)}</strong></div>` : ''}
             </div>
             <ol class="tx-review-list">
@@ -307,11 +314,31 @@ function liveDialog(): string {
       <section class="live-modal" role="dialog" aria-modal="true" aria-labelledby="live-title">
         <button class="modal-close" id="close-live-modal" aria-label="Close">×</button>
         <span class="live-kicker">DISPOSABLE WALLET · TESTNET ONLY</span>
-        <h2 id="live-title">${state.liveSession ? 'Live wallet unlocked' : 'Unlock the live testnet wallet'}</h2>
-        ${state.liveSession ? `
-          <p>The key and private note state exist only in this browser tab. Keep it open for the complete review. Choose any action and amount, then review every exact TXID before broadcasting.</p>
+        <h2 id="live-title">${state.liveSession ? 'Live wallet · receive and back up' : state.receivingWallet ? 'Independent wallet ready' : 'Unlock or create a testnet wallet'}</h2>
+        ${state.liveSession || state.receivingWallet ? `
+          <p>Private keys and notes stay in this tab and your encrypted backup. Keep both the backup file and its passphrase safe. Never reload during preparation or a partially submitted chain.</p>
           <div class="unlocked-address"><span>Testnet address</span><strong>${escapeHtml(state.liveAddress)}</strong></div>
-          <button class="primary-button" id="use-live-wallet">Choose an action →</button>
+          <div class="unlocked-address"><span>Veil v2 receiving address · share this, never your backup</span><strong class="wrap-address">${escapeHtml(state.receivingAddress)}</strong></div>
+          <button class="secondary-button" id="copy-receiving-address">Copy receiving address</button>
+          <p>${state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
+          <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
+          <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
+          <button class="secondary-button" id="save-wallet-backup">Download encrypted wallet backup${state.backupDirty ? ' · required' : ''}</button>
+          <label class="field-label" for="payment-file">Import encrypted payment file</label>
+          <input id="payment-file" type="file" accept=".json,application/json" />
+          ${state.liveSession ? `
+            <button class="secondary-button" id="save-payment-file" ${state.liveSession.paymentFile() ? '' : 'disabled'}>Download last encrypted payment</button>
+            <button class="secondary-button" id="save-pool-state">Download public pool update</button>
+            <label class="field-label" for="pool-file">Import next public pool update</label>
+            <input id="pool-file" type="file" accept=".json,application/json" />
+          ` : `<button class="primary-button" id="start-new-pool" ${state.fundingChecked ? '' : 'disabled'}>Prepare a fresh pool with this funded wallet</button>`}
+            <details><summary>Bind a mined funding output for fees</summary>
+              <p>Use a still-unspent P2PKH output to this wallet’s testnet address. This replaces the tracked fee output; it does not consolidate other coins.</p>
+              <label for="funding-hex">Raw funding transaction (hex)</label><textarea id="funding-hex" spellcheck="false"></textarea>
+              <label for="funding-index">Output index</label><input id="funding-index" type="number" min="0" value="0" />
+              <button class="secondary-button" id="bind-funding">Check mined funding output</button>
+            </details>
+          ${state.liveSession ? '<button class="primary-button" id="use-live-wallet">Choose an action →</button>' : ''}
           <button class="secondary-button" id="lock-live-wallet">Lock and clear wallet</button>
         ` : `
           <p>The separately delivered password decrypts the disposable wallet locally. It is never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
@@ -320,6 +347,11 @@ function liveDialog(): string {
           <button class="primary-button" id="unlock-live-wallet" ${state.liveUnlocking ? 'disabled' : ''}>
             ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : 'Unlock in this browser →'}
           </button>
+          <button class="secondary-button" id="create-receiving-wallet">Create independent receiving wallet</button>
+          <label class="field-label" for="restore-password">Backup passphrase</label>
+          <div class="text-field"><input id="restore-password" type="password" autocomplete="current-password" /></div>
+          <label class="field-label" for="restore-backup">Restore encrypted wallet backup</label>
+          <input id="restore-backup" type="file" accept=".json,application/json" />
         `}
         ${state.liveError ? `<p class="live-error" role="alert">${escapeHtml(state.liveError)}</p>` : ''}
         <p class="live-safety">Anyone with the password controls this disposable testnet wallet. Never use this mode with mainnet funds.</p>
@@ -371,7 +403,7 @@ function updateProofProgress(percent: number | null, label: string): void {
 }
 
 async function connectWallet(): Promise<void> {
-    if (state.liveSession) {
+    if (state.liveSession || state.receivingWallet) {
         state.liveDialogOpen = true
         state.liveError = ''
         render()
@@ -408,11 +440,12 @@ async function unlockBrowserWallet(): Promise<void> {
     try {
         const wallet = await unlockLiveWallet(password)
         password = ''
-        const { LiveVeilSession } = await import('./live-builder')
-        const session = await LiveVeilSession.create(wallet, updateProofProgress)
         const height = await testnetHeight()
-        state.liveSession = session
+        state.receivingWallet = wallet
         state.liveAddress = wallet.address
+        state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
+        state.fundingChecked = false
+        state.backupDirty = true
         state.connected = true
         state.publicBalance = wallet.funding.satoshis
         state.privateBalance = 0
@@ -431,7 +464,12 @@ async function unlockBrowserWallet(): Promise<void> {
 }
 
 function clearLiveWallet(): void {
+    if (state.busy || state.pendingLivePlan) return
+    if (state.backupDirty) { state.liveError = 'Download an up-to-date encrypted wallet backup before clearing this tab.'; state.liveDialogOpen = true; render(); return }
     state.liveSession = null
+    state.receivingWallet = null
+    state.receivingAddress = ''
+    state.fundingChecked = false
     state.liveAddress = ''
     state.connected = false
     state.liveDialogOpen = false
@@ -443,6 +481,80 @@ function clearLiveWallet(): void {
     render()
     showToast('Live wallet key cleared from this tab')
 }
+
+function downloadJson(value: unknown, name: string): void {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(value)], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}
+async function readJsonFile(file: File | undefined): Promise<any> {
+    if (!file || file.size > 64_000_000) throw new Error('Select a JSON file smaller than 64 MB')
+    return JSON.parse(await file.text())
+}
+async function walletTask(task: () => Promise<void>): Promise<void> {
+    if (state.busy || state.liveUnlocking || state.pendingLivePlan) return
+    state.busy = true
+    state.liveError = ''
+    render()
+    try { await task() }
+    catch (error) { state.liveError = error instanceof Error ? error.message : 'Wallet operation failed' }
+    finally { state.busy = false; state.liveDialogOpen = true; render() }
+}
+async function adoptSession(session: LiveVeilSession): Promise<void> {
+    state.liveSession = session
+    state.receivingWallet = null
+    state.receivingAddress = session.receivingAddress()
+    state.liveAddress = session.publicAddress()
+    state.privateBalance = session.privateBalance()
+    state.publicBalance = session.fundingBalance()
+    state.connected = true
+    state.backupDirty = true
+    state.currentHeight = await testnetHeight()
+    state.lockedBalance = session.lockedBalance(state.currentHeight)
+    state.activities = []
+}
+async function saveBackup(password: string): Promise<void> {
+    const payload = state.liveSession?.backupPayload() ?? {
+        protocol: RECIPIENT_PROTOCOL, wallet: state.receivingWallet, pool: null, notes: [],
+    }
+    const encrypted = await encryptBackup(payload, password)
+    // Test authentication before offering the file. The user still needs to
+    // retain both the downloaded file and passphrase outside this browser.
+    await decryptBackup(encrypted, password)
+    downloadJson(encrypted, 'veil-encrypted-wallet-backup.json')
+    state.backupDirty = false
+}
+async function restoreWallet(envelope: WalletBackup, password: string): Promise<void> {
+    const payload = await decryptBackup(envelope, password) as any
+    if (payload?.protocol !== RECIPIENT_PROTOCOL || !Array.isArray(payload.notes)) throw new Error('Unsupported backup payload')
+    if (!payload.pool) {
+        if (payload.notes.length) throw new Error('Backup has notes without a pool')
+        const wallet = validateReceivingWallet(payload.wallet)
+        state.receivingWallet = wallet
+        state.liveAddress = wallet.address
+        state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
+        state.publicBalance = wallet.funding.satoshis
+        state.privateBalance = 0
+        state.lockedBalance = 0
+        state.fundingChecked = false
+        state.connected = true
+        state.activities = []
+    } else {
+        const { LiveVeilSession } = await import('./live-builder')
+        await adoptSession(await LiveVeilSession.restoreBackup(payload, updateProofProgress))
+    }
+    state.backupDirty = false
+}
+
+window.addEventListener('beforeunload', event => {
+    if (state.liveSession || state.receivingWallet || state.pendingLivePlan) {
+        event.preventDefault()
+        event.returnValue = ''
+    }
+})
 
 async function prepareLiveAction(amount: number, unlockHeight: number): Promise<boolean> {
     const session = state.liveSession
@@ -497,16 +609,8 @@ async function broadcastLivePlan(): Promise<void> {
         session.commit(plan)
         state.privateBalance = plan.newPrivateBalance
         state.lockedBalance = plan.newLockedBalance
-        const createsPool = plan.transactions.some((transaction) => transaction.name === 'deploy-v4-pool')
-        const returnsToWallet = plan.action === 'withdraw' && plan.recipient === state.liveAddress
-        state.publicBalance = Math.max(
-            0,
-            state.publicBalance -
-                plan.totalFees -
-                (plan.action === 'shield' ? plan.amount : 0) -
-                (createsPool ? 1 : 0) +
-                (returnsToWallet ? plan.amount : 0)
-        )
+        state.publicBalance = session.fundingBalance()
+        state.backupDirty = true
         const finalTx = plan.transactions.at(-1)!
         state.activities.unshift({
             kind: plan.action,
@@ -531,7 +635,9 @@ async function broadcastLivePlan(): Promise<void> {
         state.liveBroadcastIndex = -1
         state.busy = false
         render()
-        showToast('Exact parent-first chain accepted by ARC on testnet')
+        state.liveDialogOpen = true
+        render()
+        showToast(plan.action === 'send' ? 'ARC accepted. Save your backup and encrypted payment file; recipient imports after mining.' : 'ARC accepted. Save an updated encrypted backup and share the pool update with the other wallet.')
     } catch (error) {
         state.busy = false
         state.liveError = error instanceof Error ? error.message : 'ARC did not accept the transaction chain'
@@ -540,6 +646,7 @@ async function broadcastLivePlan(): Promise<void> {
 }
 
 async function submit(): Promise<boolean> {
+    if (state.receivingWallet) { state.liveDialogOpen = true; render(); showToast('Import a payment or prepare a funded pool first'); return false }
     const amount = Number.parseInt(state.amount, 10)
     const available = state.action === 'shield' ? state.publicBalance : state.privateBalance
     if (!Number.isSafeInteger(amount) || amount <= 0) {
@@ -556,7 +663,6 @@ async function submit(): Promise<boolean> {
     }
     if (
         copy[state.action].recipient &&
-        !(state.liveSession && state.action === 'send') &&
         state.recipient.trim().length < 4
     ) {
         showToast(state.action === 'send' ? 'Enter a Veil address' : 'Enter a BSV address')
@@ -661,7 +767,7 @@ function resetDemoState(): void {
 
 async function runDemo(): Promise<void> {
     if (state.demoRunning || state.busy) return
-    if (state.liveSession) {
+    if (state.liveSession || state.receivingWallet) {
         showToast('Lock the live wallet before running the local proof demo')
         return
     }
@@ -702,6 +808,84 @@ async function runDemo(): Promise<void> {
 }
 
 function wireEvents(): void {
+    document.querySelector('#create-receiving-wallet')?.addEventListener('click', () => void walletTask(async () => {
+        const wallet = createReceivingWallet()
+        state.receivingWallet = wallet
+        state.liveAddress = wallet.address
+        state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
+        state.privateBalance = 0
+        state.publicBalance = 0
+        state.lockedBalance = 0
+        state.activities = []
+        state.backupDirty = true
+        state.fundingChecked = false
+        state.connected = true
+    }))
+    document.querySelector('#copy-receiving-address')?.addEventListener('click', () => {
+        if (state.backupDirty && !state.liveSession) { showToast('Save the encrypted receiver backup before sharing this address'); return }
+        void navigator.clipboard?.writeText(state.receivingAddress)
+    })
+    document.querySelector('#save-wallet-backup')?.addEventListener('click', () => {
+        const input = document.querySelector<HTMLInputElement>('#backup-password')!
+        const password = input.value
+        input.value = ''
+        void walletTask(() => saveBackup(password))
+    })
+    document.querySelector<HTMLInputElement>('#restore-backup')?.addEventListener('change', event => {
+        const file = (event.target as HTMLInputElement).files?.[0]
+        const input = document.querySelector<HTMLInputElement>('#restore-password')!
+        const password = input.value
+        input.value = ''
+        void walletTask(async () => restoreWallet(await readJsonFile(file), password))
+    })
+    document.querySelector<HTMLInputElement>('#payment-file')?.addEventListener('change', event => {
+        const file = (event.target as HTMLInputElement).files?.[0]
+        void walletTask(async () => {
+            const payment = await readJsonFile(file) as EncryptedPayment
+            if (state.liveSession) {
+                await state.liveSession.importPayment(payment)
+                await adoptSession(state.liveSession)
+            } else if (state.receivingWallet) {
+                const { LiveVeilSession } = await import('./live-builder')
+                await adoptSession(await LiveVeilSession.receive(state.receivingWallet, payment, updateProofProgress))
+            }
+        })
+    })
+    document.querySelector('#save-payment-file')?.addEventListener('click', () => {
+        const payment = state.liveSession?.paymentFile()
+        if (payment) downloadJson(payment, 'veil-encrypted-payment.json')
+    })
+    document.querySelector('#save-pool-state')?.addEventListener('click', () => void walletTask(async () => {
+        downloadJson(state.liveSession!.poolSnapshot(), 'veil-public-pool-update.json')
+    }))
+    document.querySelector<HTMLInputElement>('#pool-file')?.addEventListener('change', event => {
+        const file = (event.target as HTMLInputElement).files?.[0]
+        void walletTask(async () => {
+            await state.liveSession!.importPoolSnapshot(await readJsonFile(file))
+            await adoptSession(state.liveSession!)
+        })
+    })
+    document.querySelector('#bind-funding')?.addEventListener('click', () => {
+        const raw = document.querySelector<HTMLTextAreaElement>('#funding-hex')!.value.trim()
+        const index = Number(document.querySelector<HTMLInputElement>('#funding-index')!.value)
+        void walletTask(async () => {
+            if (state.liveSession) {
+                await state.liveSession.bindFunding(raw, index)
+                state.publicBalance = state.liveSession.fundingBalance()
+            } else if (state.receivingWallet) {
+                const { checkedFunding } = await import('./live-funding')
+                state.receivingWallet.funding = await checkedFunding(raw, index, state.receivingWallet.address)
+                state.publicBalance = state.receivingWallet.funding.satoshis
+                state.fundingChecked = true
+            }
+            state.backupDirty = true
+        })
+    })
+    document.querySelector('#start-new-pool')?.addEventListener('click', () => void walletTask(async () => {
+        if (!state.fundingChecked || !state.receivingWallet) throw new Error('Bind mined funding first')
+        const { LiveVeilSession } = await import('./live-builder')
+        await adoptSession(await LiveVeilSession.create(state.receivingWallet, updateProofProgress))
+    }))
     document.querySelectorAll<HTMLButtonElement>('[data-run-demo]').forEach((button) => {
         button.addEventListener('click', runDemo)
     })
@@ -726,7 +910,9 @@ function wireEvents(): void {
         render()
     })
     document.querySelector('#copy-address')?.addEventListener('click', async () => {
-        await navigator.clipboard?.writeText('veil1qx7kd2v5myu8r3e4psw0c9t6g8f4n')
+        if (!state.receivingAddress) { showToast('Create or unlock a live wallet for a real receiving address'); return }
+        if (state.receivingWallet && state.backupDirty) { showToast('Save the encrypted receiver backup before sharing this address'); return }
+        await navigator.clipboard?.writeText(state.receivingAddress)
         showToast('Private address copied')
     })
     document.querySelector('#max-amount')?.addEventListener('click', () => {

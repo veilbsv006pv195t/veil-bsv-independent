@@ -6,6 +6,15 @@ export const FIELD =
     21888242871839275222246405745257275088548364400416034343698204186575808495617n
 export const STATEMENT_DOMAIN = 1447381314n
 export const MAX_BLOCK_HEIGHT = 499_999_999n
+// Domain separation for recipient-owned notes; the original circuit is retained
+// for historical replay only. This public identifier is not a spending secret.
+export const RECIPIENT_KEY_DOMAIN = 1447381298n
+export function recipientOwner(hash: HashFn, spendingKey: bigint): bigint {
+    if (spendingKey <= 0n || spendingKey >= FIELD) throw new Error('Invalid recipient spending key')
+    // MiMC7 is a keyed permutation. The secret MUST be the key (right slot):
+    // hash(secret, publicDomain) is invertible under the known public key.
+    return hash(RECIPIENT_KEY_DOMAIN, spendingKey)
+}
 
 export type HashFn = (left: bigint, right: bigint) => bigint
 
@@ -180,6 +189,7 @@ export interface OutputNoteData {
 
 export interface SpendData {
     note: Note
+    spendingKey?: bigint
 }
 
 export interface TransitionRequest {
@@ -213,7 +223,7 @@ export class PoolState {
     nextIndex: number
     private readonly hash: HashFn
 
-    constructor(hash: HashFn) {
+    constructor(hash: HashFn, readonly recipientOwned = false) {
         this.hash = hash
         this.noteTree = new MerkleTree(hash)
         this.nullifierTree = new MerkleTree(hash)
@@ -285,6 +295,10 @@ export class PoolState {
         const inputNullifierSiblings = this.nullifierTree.path(inputIndex)
 
         if (spend) {
+            if (this.recipientOwned && (
+                request.spend?.spendingKey === undefined ||
+                recipientOwner(this.hash, request.spend.spendingKey) !== spend.ownerKey
+            )) throw new Error('Recipient spending key does not own this note')
             if (this.noteTree.leaves[spend.index] !== spend.commitment) {
                 throw new Error('input note is not in the current note tree')
             }
@@ -299,7 +313,7 @@ export class PoolState {
         }
 
         const nullifier = spend
-            ? noteNullifier(this.hash, spend.commitment, spend.ownerKey)
+            ? noteNullifier(this.hash, spend.commitment, this.recipientOwned ? request.spend!.spendingKey! : spend.ownerKey)
             : 0n
         if (spend) this.nullifierTree.set(spend.index, nullifier)
 
@@ -394,6 +408,7 @@ export class PoolState {
                 ),
                 inputAmount: decimal(spend?.amount ?? 0n),
                 inputOwnerKey: decimal(spend?.ownerKey ?? 0n),
+                ...(this.recipientOwned ? { inputSpendingKey: decimal(request.spend?.spendingKey ?? 0n) } : {}),
                 inputLockHeight: decimal(spend?.lockHeight ?? 0n),
                 inputRho: decimal(spend?.rho ?? 0n),
                 inputIndex: decimal(inputIndex),

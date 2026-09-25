@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-0.2.2}"
+version="${1:-$(node -p 'require("./package.json").version')}"
 bundle_name="veil-bsv-replay-${version}"
 release_dir="${project_root}/release"
 archive="${release_dir}/${bundle_name}.zip"
@@ -30,6 +30,7 @@ for item in \
   THIRD_PARTY_NOTICES.md \
   COMPATIBILITY.md \
   README.md \
+  TWO_WALLET_DEMO.md \
   REPLAY_GUIDE.md \
   RUN_REPLAY.command \
   SECURITY.md \
@@ -57,6 +58,7 @@ done
 mkdir -p "${bundle_dir}/ui" "${bundle_dir}/artifacts/src/v4" "${bundle_dir}/artifacts/v4"
 cp "${project_root}/ui/index.html" "${bundle_dir}/ui/"
 cp "${project_root}/ui/vite.config.ts" "${bundle_dir}/ui/"
+cp "${project_root}/ui/tsconfig.json" "${bundle_dir}/ui/"
 cp -R "${project_root}/ui/src" "${bundle_dir}/ui/"
 
 # Ship the historical monolithic artifact and the deployed optimized-v4

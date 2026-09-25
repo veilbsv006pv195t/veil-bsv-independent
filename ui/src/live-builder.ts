@@ -21,8 +21,10 @@ import { VeilV4Miller1 } from '../../src/v4/veilV4Miller1'
 import { VeilV4Miller2 } from '../../src/v4/veilV4Miller2'
 import { VeilV4Miller3 } from '../../src/v4/veilV4Miller3'
 import { VeilV4Preparation } from '../../src/v4/veilV4Preparation'
-import { LiveWallet } from './live-wallet'
-import { MinerPolicy, testnetHeight, testnetPolicy } from './live-network'
+import { RECIPIENT_PROTOCOL, EncryptedPayment, encryptPayment, decryptPayment, parseRecipientAddress, recipientIdentity } from '../../src/recipient'
+import { PoolSnapshot, EncodedNote, encodeNote, decodeNote, restorePool, assertMonotonic } from '../../src/recipientState'
+import { LiveWallet, validateReceivingWallet } from './live-wallet'
+import { MinerPolicy, testnetHeight, testnetPolicy, transactionStatus } from './live-network'
 
 export type LiveAction = 'shield' | 'send' | 'lock' | 'withdraw'
 
@@ -46,13 +48,14 @@ export interface PreparedLiveAction {
     totalFees: number
     transactions: PreparedTransaction[]
     warning: string
+    payment?: EncryptedPayment
+    snapshot: PoolSnapshot
     _next: {
         poolState: PoolState
         notes: Note[]
         poolTx: bsv.Transaction
         pool: ShieldedPoolV4
-        fundingTx: bsv.Transaction
-        fundingIndex: number
+        funding: LiveWallet['funding']
         deploymentCommitted: boolean
     }
 }
@@ -146,7 +149,7 @@ async function loadArtifacts(): Promise<PreparedVk> {
             fetchJson<unknown>('contracts/veilV4Miller2.json'),
             fetchJson<unknown>('contracts/veilV4Miller3.json'),
             fetchJson<unknown>('contracts/veilV4Finalizer.json'),
-            fetchJson<SnarkVerificationKey>('verification_key.json'),
+            fetchJson<SnarkVerificationKey>('recipient/verification_key.json'),
         ])
         ShieldedPoolV4.loadArtifact(pool as never)
         VeilV4Preparation.loadArtifact(preparation as never)
@@ -168,21 +171,16 @@ function randomField(): bigint {
     return value === 0n ? 1n : value
 }
 
-async function ownerKey(wif: string): Promise<bigint> {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(wif)))
-    let value = 0n
-    for (const byte of digest) value = (value << 8n) + BigInt(byte)
-    return value % FIELD || 1n
-}
-
 function recipientField(address: string): bigint {
-    const hash = bsv.Address.fromString(address, bsv.Networks.testnet).hashBuffer
+    const parsed = bsv.Address.fromString(address, bsv.Networks.testnet)
+    if (parsed.network.name !== 'testnet' || parsed.type !== 'pubkeyhash') throw new Error('Withdraw supports testnet P2PKH addresses only')
+    const hash = parsed.hashBuffer
     const hex = Array.from(hash).reverse().map((byte) => byte.toString(16).padStart(2, '0')).join('')
     return BigInt(`0x${hex}`)
 }
 
 function cloneState(source: PoolState, hash: HashFn): PoolState {
-    const clone = new PoolState(hash)
+    const clone = new PoolState(hash, source.recipientOwned)
     source.noteTree.leaves.forEach((value, index) => clone.noteTree.set(index, value))
     source.nullifierTree.leaves.forEach((value, index) => clone.nullifierTree.set(index, value))
     clone.nextIndex = source.nextIndex
@@ -364,19 +362,17 @@ function completeStage(
 }
 
 function buildSplit(
-    sourceTx: bsv.Transaction,
-    sourceOutputIndex: number,
+    funding: LiveWallet['funding'],
     sponsors: readonly number[],
     wallet: LiveWallet,
     key: bsv.PrivateKey,
     policy: MinerPolicy
 ): FundingSplit {
-    const source = sourceTx.outputs[sourceOutputIndex]
-    if (!source) throw new Error('The live wallet funding output is missing')
     const p2pkh = bsv.Script.buildPublicKeyHashOut(wallet.address)
-    if (source.script.toHex() !== p2pkh.toHex()) throw new Error('The funding output is not owned by this wallet')
+    if (funding.satoshis <= sponsors.reduce((a, b) => a + b, 0) + SPLIT_FEE_SATS) throw new Error('Fund this wallet with testnet coins for the action and miner fees first')
+    const source = new bsv.Transaction.Output({ script: p2pkh, satoshis: funding.satoshis })
     const tx = new bsv.Transaction()
-    tx.from({ txId: sourceTx.id, outputIndex: sourceOutputIndex, script: source.script.toHex(), satoshis: source.satoshis })
+    tx.from({ txId: funding.txid, outputIndex: funding.vout, script: source.script.toHex(), satoshis: source.satoshis })
     sponsors.forEach((satoshis) => tx.addOutput(new bsv.Transaction.Output({ script: p2pkh, satoshis })))
     tx.fee(SPLIT_FEE_SATS)
     tx.change(wallet.address)
@@ -560,8 +556,10 @@ export class LiveVeilSession {
     private notes: Note[] = []
     private poolTx: bsv.Transaction
     private pool: ShieldedPoolV4
-    private fundingTx: bsv.Transaction
-    private fundingIndex: number
+    private funding: LiveWallet['funding']
+    private snapshot?: PoolSnapshot
+    private poolId: string
+    private lastPayment?: EncryptedPayment
     private deployment: PreparedTransaction
     private deploymentCommitted = false
 
@@ -584,12 +582,14 @@ export class LiveVeilSession {
         this.poolState = poolState
         this.poolTx = poolTx
         this.pool = pool
-        this.fundingTx = poolTx
-        this.fundingIndex = fundingIndex
+        this.funding = { txid: poolTx.id, vout: fundingIndex, satoshis: poolTx.outputs[fundingIndex]?.satoshis ?? 0 }
+        this.poolId = poolTx.id
         this.deployment = deployment
     }
 
     static async create(wallet: LiveWallet, progress: BuilderProgress): Promise<LiveVeilSession> {
+        validateReceivingWallet(wallet)
+        if (wallet.funding.satoshis <= 0) throw new Error('Fund this wallet before creating a new pool')
         progress(2, 'Loading audited contract artifacts')
         const [vk, hash, policy] = await Promise.all([
             loadArtifacts(),
@@ -598,7 +598,7 @@ export class LiveVeilSession {
         ])
         const funding = wallet.funding
         progress(8, 'Building fresh v4 pool deployment')
-        const poolState = new PoolState(hash)
+        const poolState = new PoolState(hash, true)
         const contracts = verifierContracts(vk)
         const pool = new ShieldedPoolV4(
             poolState.noteTree.root(), poolState.nullifierTree.root(), 0n,
@@ -646,6 +646,131 @@ export class LiveVeilSession {
         return this.notes.reduce((sum, note) => sum + Number(note.amount), 0)
     }
 
+    receivingAddress(): string { return recipientIdentity(this.wallet.wif, this.hash).address }
+    publicAddress(): string { return this.wallet.address }
+    fundingBalance(): number { return this.funding.satoshis }
+    paymentFile(): EncryptedPayment | undefined { return this.lastPayment }
+    poolSnapshot(): PoolSnapshot {
+        if (!this.snapshot) throw new Error('Complete an action before exporting pool state')
+        return this.snapshot
+    }
+    backupPayload(): unknown {
+        return {
+            protocol: RECIPIENT_PROTOCOL,
+            wallet: { ...this.wallet, funding: this.deploymentCommitted ? this.funding : this.wallet.funding },
+            pool: this.snapshot ?? null,
+            notes: this.notes.map(encodeNote),
+            lastPayment: this.lastPayment,
+        }
+    }
+
+    // A snapshot is not trusted merely because it decrypted. Bind its trees to
+    // the exact new-verifier contract, link every stage, and require ARC MINED.
+    private static async checkedSnapshot(snapshot: PoolSnapshot, hash: HashFn, vk: PreparedVk) {
+        const state = restorePool(snapshot, hash)
+        const raw = [snapshot.rawPoolTx, ...snapshot.chain]
+        if (raw.some(value => typeof value !== 'string' || value.length > 22_000_000 || !/^(?:[0-9a-f]{2})+$/.test(value))) throw new Error('Invalid transaction encoding in snapshot')
+        const tx = new bsv.Transaction(snapshot.rawPoolTx)
+        const contracts = verifierContracts(vk)
+        // Constructor constants remain bound to the empty genesis state even
+        // when the mutable state roots advance. Reconstruct the same code part.
+        const empty = new PoolState(hash, true)
+        const pool = new ShieldedPoolV4(empty.noteTree.root(), empty.nullifierTree.root(), 0n, hash256(contracts.preparation.codePart)).next()
+        pool.noteRoot = state.noteTree.root()
+        pool.nullifierRoot = state.nullifierTree.root()
+        pool.nextIndex = BigInt(state.nextIndex)
+        if (!tx.outputs[0] || tx.outputs[0].satoshis < STATE_ANCHOR_SATS || tx.outputs[0].script.toHex() !== pool.lockingScript.toHex()) throw new Error('Pool state does not match the recipient-owned on-chain contract')
+        let previous = snapshot.previousPoolTxid
+        for (const stage of snapshot.chain) {
+            const child = new bsv.Transaction(stage)
+            if (child.inputs[0]?.prevTxId.toString('hex') !== previous || child.inputs[0]?.outputIndex !== 0) throw new Error('Broken pool transaction lineage')
+            previous = child.id
+        }
+        if (previous !== tx.id || snapshot.chain.at(-1) !== snapshot.rawPoolTx) throw new Error('Pool finalizer mismatch')
+        const status = await transactionStatus(tx.id)
+        if (status?.txStatus !== 'MINED') throw new Error('Wait until the pool finalizer is MINED before importing this file')
+        return { state, tx, pool }
+    }
+
+    static async receive(walletInput: LiveWallet, envelope: EncryptedPayment, progress: BuilderProgress): Promise<LiveVeilSession> {
+        const wallet = validateReceivingWallet(walletInput)
+        const [hash, vk, policy] = await Promise.all([createHash(), loadArtifacts(), testnetPolicy()])
+        progress(null, 'Authenticating received payment and checking its mined pool')
+        const packet = await decryptPayment(envelope, wallet.wif, hash) as { protocol: string; pool: PoolSnapshot; note: EncodedNote }
+        if (packet?.protocol !== RECIPIENT_PROTOCOL) throw new Error('Unsupported payment protocol')
+        const checked = await this.checkedSnapshot(packet.pool, hash, vk)
+        const identity = recipientIdentity(wallet.wif, hash)
+        const note = decodeNote(packet.note, checked.state, identity.owner, hash)
+        if (BigInt(checked.tx.outputs[0].satoshis) < note.amount + 1n) throw new Error('Pool output cannot cover the received note')
+        const session = new LiveVeilSession(wallet, hash, vk, policy, checked.state, checked.tx, checked.pool, 0, { name: 'imported-pool', txid: checked.tx.id, rawHex: checked.tx.toString(), bytes: checked.tx.toString().length / 2, feeSatoshis: 0 })
+        session.funding = wallet.funding
+        session.poolId = packet.pool.poolId
+        session.snapshot = packet.pool
+        session.deploymentCommitted = true
+        session.notes = [note]
+        return session
+    }
+
+    async importPayment(envelope: EncryptedPayment): Promise<void> {
+        const packet = await decryptPayment(envelope, this.wallet.wif, this.hash) as { protocol: string; pool: PoolSnapshot; note: EncodedNote }
+        if (packet?.protocol !== RECIPIENT_PROTOCOL) throw new Error('Unsupported payment protocol')
+        const checked = await LiveVeilSession.checkedSnapshot(packet.pool, this.hash, this.vk)
+        this.checkSuccessor(packet.pool, checked.state, checked.tx)
+        const note = decodeNote(packet.note, checked.state, recipientIdentity(this.wallet.wif, this.hash).owner, this.hash)
+        if (this.notes.some(existing => existing.commitment === note.commitment)) throw new Error('This payment has already been imported')
+        const notes = this.notes.filter(existing => checked.state.nullifierTree.leaves[existing.index] === 0n).concat(note)
+        if (notes.reduce((sum, n) => sum + n.amount, 1n) > BigInt(checked.tx.outputs[0].satoshis)) throw new Error('Notes exceed pool backing')
+        this.acceptSnapshot(packet.pool, checked, notes)
+    }
+
+    private checkSuccessor(snapshot: PoolSnapshot, state: PoolState, tx: bsv.Transaction): void {
+        if (snapshot.poolId !== this.poolId) throw new Error('This file belongs to another pool; use a separate wallet session')
+        if (tx.id !== this.poolTx.id && snapshot.previousPoolTxid !== this.poolTx.id) throw new Error('Import the missing intermediate pool updates first; stale or unrelated state is not accepted')
+        assertMonotonic(this.poolState, state)
+    }
+    private acceptSnapshot(snapshot: PoolSnapshot, checked: { state: PoolState; tx: bsv.Transaction; pool: ShieldedPoolV4 }, notes: Note[]): void {
+        this.poolState = checked.state
+        this.poolTx = checked.tx
+        this.pool = checked.pool
+        this.snapshot = snapshot
+        this.notes = notes
+    }
+    async importPoolSnapshot(snapshot: PoolSnapshot): Promise<void> {
+        const checked = await LiveVeilSession.checkedSnapshot(snapshot, this.hash, this.vk)
+        this.checkSuccessor(snapshot, checked.state, checked.tx)
+        this.acceptSnapshot(snapshot, checked, this.notes.filter(note => checked.state.nullifierTree.leaves[note.index] === 0n))
+    }
+    async bindFunding(rawHex: string, vout: number): Promise<void> {
+        if (!this.deploymentCommitted) throw new Error('The prepared fresh deployment has fixed funding; finish it before replacing the tracked fee output')
+        if (!Number.isSafeInteger(vout) || vout < 0 || rawHex.length > 22_000_000 || !/^(?:[0-9a-f]{2})+$/.test(rawHex)) throw new Error('Invalid funding transaction or output index')
+        const tx = new bsv.Transaction(rawHex)
+        const output = tx.outputs[vout]
+        if (!output || output.script.toHex() !== bsv.Script.buildPublicKeyHashOut(this.wallet.address).toHex()) throw new Error('Funding output is not owned by this wallet')
+        if ((await transactionStatus(tx.id))?.txStatus !== 'MINED') throw new Error('Wait for funding to be mined')
+        this.funding = { txid: tx.id, vout, satoshis: output.satoshis }
+    }
+    static async restoreBackup(value: any, progress: BuilderProgress): Promise<LiveVeilSession> {
+        if (value?.protocol !== RECIPIENT_PROTOCOL || !Array.isArray(value.notes)) throw new Error('Unsupported wallet backup')
+        const wallet = validateReceivingWallet(value.wallet)
+        if (!value.pool) {
+            if (value.notes.length) throw new Error('Backup has notes without pool state')
+            return this.create(wallet, progress)
+        }
+        const [hash, vk, policy] = await Promise.all([createHash(), loadArtifacts(), testnetPolicy()])
+        const checked = await this.checkedSnapshot(value.pool, hash, vk)
+        const identity = recipientIdentity(wallet.wif, hash)
+        const notes = value.notes.map((note: EncodedNote) => decodeNote(note, checked.state, identity.owner, hash))
+        if (new Set(notes.map((note: Note) => note.index)).size !== notes.length || notes.reduce((sum: bigint, n: Note) => sum + n.amount, 1n) > BigInt(checked.tx.outputs[0].satoshis)) throw new Error('Invalid note collection')
+        const session = new LiveVeilSession(wallet, hash, vk, policy, checked.state, checked.tx, checked.pool, 0, { name: 'restored-pool', txid: checked.tx.id, rawHex: checked.tx.toString(), bytes: checked.tx.toString().length / 2, feeSatoshis: 0 })
+        session.funding = wallet.funding
+        session.poolId = value.pool.poolId
+        session.snapshot = value.pool
+        session.deploymentCommitted = true
+        session.notes = notes
+        session.lastPayment = value.lastPayment
+        return session
+    }
+
     lockedBalance(height: number): number {
         return this.notes
             .filter((note) => Number(note.lockHeight) > height)
@@ -662,7 +787,10 @@ export class LiveVeilSession {
         if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Enter a positive whole-satoshi amount')
         const startHeight = await testnetHeight()
         const stagedState = cloneState(this.poolState, this.hash)
-        const ownedKey = await ownerKey(this.wallet.wif)
+        const identity = recipientIdentity(this.wallet.wif, this.hash)
+        const ownedKey = identity.owner
+        const destination = action === 'send' ? parseRecipientAddress(recipient) : undefined
+        if (action === 'send' && recipient === identity.address) throw new Error('Use another wallet’s Veil address for Send; use Lock to create a self-owned locked note')
         const oldPrivateBalance = this.privateBalance()
         let built: BuiltTransition
         let spent: Note | undefined
@@ -687,7 +815,7 @@ export class LiveVeilSession {
                 bsv.Address.fromString(publicRecipient, bsv.Networks.testnet)
                 built = stagedState.build({
                     mode: 2,
-                    spend: { note: spent },
+                    spend: { note: spent, spendingKey: identity.spendingKey },
                     currentHeight: BigInt(startHeight),
                     publicOut: BigInt(amount),
                     recipient: recipientField(publicRecipient),
@@ -702,12 +830,12 @@ export class LiveVeilSession {
                 }
                 built = stagedState.build({
                     mode: 1,
-                    spend: { note: spent },
+                    spend: { note: spent, spendingKey: identity.spendingKey },
                     currentHeight: BigInt(startHeight),
                     outputs: [
                         {
                             amount: BigInt(amount),
-                            ownerKey: ownedKey,
+                            ownerKey: destination?.owner ?? ownedKey,
                             rho: randomField(),
                             lockHeight: BigInt(lockHeight),
                         },
@@ -720,10 +848,15 @@ export class LiveVeilSession {
         // Validate canonical recipient bytes before doing expensive proof work.
         const transition = transitionFrom(built)
         progress(null, 'Generating Groth16 proof…')
+        const [wasm, zkey] = await Promise.all(['shielded_pool.wasm', 'shielded_pool_final.zkey'].map(async name => {
+            const response = await fetch(asset(`recipient/${name}`))
+            if (!response.ok) throw new Error(`Required recipient proof artifact is unavailable: ${name}`)
+            return new Uint8Array(await response.arrayBuffer())
+        }))
         const { proof } = await groth16.fullProve(
             built.circuitInput,
-            asset('shielded_pool.wasm'),
-            asset('shielded_pool_final.zkey')
+            wasm,
+            zkey
         )
         progress(58, 'Preparing on-chain verifier witness')
         const converted = toScryptProof(proof as SnarkProof)
@@ -733,7 +866,7 @@ export class LiveVeilSession {
             80_000, 75_000, 75_000, 75_000, 45_000, 21_000, 40_000,
         ]
         const split = buildSplit(
-            this.fundingTx, this.fundingIndex, sponsors,
+            this.funding, sponsors,
             this.wallet, this.key, this.policy
         )
         progress(66, 'Funding and fee split signed locally')
@@ -743,7 +876,7 @@ export class LiveVeilSession {
             this.wallet, this.key, this.policy, progress
         )
         const splitTx = new bsv.Transaction(split.rawHex)
-        const newNotes = this.notes.filter((note) => note !== spent).concat(built.outputNotes)
+        const newNotes = this.notes.filter((note) => note !== spent).concat(built.outputNotes.filter(note => note.ownerKey === ownedKey))
         const transactions: PreparedTransaction[] = [
             ...(this.deploymentCommitted ? [] : [this.deployment]),
             {
@@ -759,11 +892,21 @@ export class LiveVeilSession {
         const newLockedBalance = newNotes
             .filter((note) => Number(note.lockHeight) > startHeight)
             .reduce((sum, note) => sum + Number(note.amount), 0)
+        const snapshot: PoolSnapshot = {
+            protocol: RECIPIENT_PROTOCOL, poolId: this.poolId,
+            rawPoolTx: pipeline.finalTx.toString(), previousPoolTxid: this.poolTx.id,
+            chain: pipeline.stages.map(stage => stage.rawHex),
+            nextIndex: stagedState.nextIndex,
+            leaves: stagedState.noteTree.leaves.map(String), nullifiers: stagedState.nullifierTree.leaves.map(String),
+        }
+        const payment = action === 'send'
+            ? await encryptPayment(recipient, { protocol: RECIPIENT_PROTOCOL, pool: snapshot, note: encodeNote(built.outputNotes[0]) })
+            : undefined
         progress(100, 'Exact transaction chain ready for review')
         return {
             action,
             amount,
-            recipient: action === 'withdraw' ? publicRecipient : undefined,
+            recipient: action === 'withdraw' ? publicRecipient : action === 'send' ? recipient : undefined,
             unlockHeight: action === 'lock' ? unlockHeight : undefined,
             startHeight,
             oldPrivateBalance,
@@ -771,14 +914,15 @@ export class LiveVeilSession {
             newLockedBalance,
             totalFees: transactions.reduce((sum, tx) => sum + tx.feeSatoshis, 0),
             transactions,
-            warning: 'These exact testnet transactions are signed but have not been broadcast.',
+            warning: 'These exact testnet transactions are signed but have not been broadcast. Send requires delivering the encrypted payment file after mining.',
+            payment,
+            snapshot,
             _next: {
                 poolState: stagedState,
                 notes: newNotes,
                 poolTx: pipeline.finalTx,
                 pool: pipeline.nextPool,
-                fundingTx: splitTx,
-                fundingIndex: split.changeOutputIndex,
+                funding: { txid: splitTx.id, vout: split.changeOutputIndex, satoshis: split.changeSatoshis },
                 deploymentCommitted: true,
             },
         }
@@ -789,8 +933,9 @@ export class LiveVeilSession {
         this.notes = plan._next.notes
         this.poolTx = plan._next.poolTx
         this.pool = plan._next.pool
-        this.fundingTx = plan._next.fundingTx
-        this.fundingIndex = plan._next.fundingIndex
+        this.funding = plan._next.funding
+        this.snapshot = plan.snapshot
+        this.lastPayment = plan.payment ?? this.lastPayment
         this.deploymentCommitted = plan._next.deploymentCommitted
     }
 }

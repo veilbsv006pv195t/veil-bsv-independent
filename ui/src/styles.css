@@ -154,6 +154,7 @@ footer { height: 78px; border-top: 1px solid rgba(23,33,27,.08); display: flex; 
 footer a { color: var(--green); text-decoration: none; font-weight: 700; }
 .toast { position: fixed; left: 50%; bottom: 24px; z-index: 10; transform: translate(-50%, 20px); padding: 12px 17px; border-radius: 11px; color: white; background: #17211b; box-shadow: 0 10px 30px rgba(0,0,0,.2); font-size: 12px; font-weight: 650; opacity: 0; pointer-events: none; transition: .22s; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast { z-index: 50; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 22px; background: rgba(10,18,14,.72); backdrop-filter: blur(7px); }
 .live-modal { position: relative; width: min(100%, 560px); max-height: calc(100vh - 44px); overflow: auto; border: 1px solid rgba(23,33,27,.12); border-radius: 22px; padding: 31px; background: #fbfcf9; box-shadow: 0 28px 90px rgba(0,0,0,.3); }
@@ -163,6 +164,11 @@ footer a { color: var(--green); text-decoration: none; font-weight: 700; }
 .live-modal h2 { margin: 9px 0 10px; font-family: Georgia, serif; font-size: 30px; font-weight: 500; letter-spacing: -.025em; }
 .live-modal > p { margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .live-modal .primary-button { margin-top: 17px; }
+.live-modal input[type="file"] { display: block; max-width: 100%; margin: 9px 0 18px; color: inherit; font-size: 12px; }
+.live-modal details { margin-top: 18px; font-size: 12px; line-height: 1.6; }
+.live-modal details label { display: block; margin-top: 10px; }
+.live-modal textarea, .live-modal input[type="number"] { width: 100%; color: inherit; background: transparent; border: 1px solid #657068; border-radius: 8px; padding: 8px; }
+.live-modal textarea { min-height: 90px; resize: vertical; }
 .secondary-button { width: 100%; min-height: 43px; margin-top: 9px; border: 1px solid #d8ded7; border-radius: 11px; color: var(--green); background: transparent; font-size: 12px; font-weight: 750; }
 .unlocked-address { margin: 20px 0 4px; padding: 14px 15px; border: 1px solid #d8ded7; border-radius: 12px; background: white; }
 .unlocked-address span, .review-summary span { display: block; margin-bottom: 4px; color: #89918b; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; }

@@ -14,7 +14,7 @@ import {
     BN256Pairing,
     LineFuncRes,
 } from 'scrypt-ts-lib/dist/ec/bn256'
-import { PoolState, createHash } from '../src/crypto'
+import { PoolState, createHash, recipientOwner } from '../src/crypto'
 import {
     SnarkProof,
     SnarkVerificationKey,
@@ -32,9 +32,11 @@ import { VeilV4Miller2 } from '../src/v4/veilV4Miller2'
 import { VeilV4Miller3 } from '../src/v4/veilV4Miller3'
 import { VeilV4Preparation } from '../src/v4/veilV4Preparation'
 
-const WASM = path.resolve('build/shielded_pool_js/shielded_pool.wasm')
-const ZKEY = path.resolve('build/shielded_pool_final.zkey')
-const VKEY = path.resolve('build/verification_key.json')
+const recipientOwned = process.argv.includes('--recipient-owned')
+const buildPath = recipientOwned ? 'build/recipient' : 'build'
+const WASM = path.resolve(buildPath, 'shielded_pool_js/shielded_pool.wasm')
+const ZKEY = path.resolve(buildPath, 'shielded_pool_final.zkey')
+const VKEY = path.resolve(buildPath, 'verification_key.json')
 const ZERO_HASH = Sha256(toByteString('00'.repeat(32)))
 const DIGITS = [
     1, 0, 1, 0, 0, -1, 0, 1, 1, 0, 0, 0, -1, 0, 0, 1,
@@ -219,19 +221,21 @@ async function runScenario(recipient?: bigint): Promise<void> {
     VeilV4Miller3.loadArtifact('artifacts/src/v4/veilV4Miller3.json')
     VeilV4Finalizer.loadArtifact('artifacts/src/v4/veilV4Finalizer.json')
 
-    const publicState = new PoolState(await createHash())
+    const hash = await createHash()
+    const publicState = new PoolState(hash, recipientOwned)
+    const owner = recipientOwned ? recipientOwner(hash, 101n) : 101n
     const deposit = publicState.build({
         mode: 0,
         publicIn: 1_000n,
-        outputs: [{ amount: 1_000n, ownerKey: 101n, rho: 10_001n }],
+        outputs: [{ amount: 1_000n, ownerKey: owner, rho: 10_001n }],
     })
     const built = recipient === undefined ? deposit : publicState.build({
         mode: 2,
-        spend: { note: deposit.outputNotes[0] },
+        spend: { note: deposit.outputNotes[0], ...(recipientOwned ? { spendingKey: 101n } : {}) },
         currentHeight: 900_000n,
         publicOut: 500n,
         recipient,
-        outputs: [{ amount: 500n, ownerKey: 101n, rho: 10_002n }],
+        outputs: [{ amount: 500n, ownerKey: owner, rho: 10_002n }],
     })
     const sourceValue = recipient === undefined ? 1 : 1_001
     const nextValue = 1_001 - Number(built.public.publicOut)

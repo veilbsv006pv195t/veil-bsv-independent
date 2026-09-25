@@ -14,6 +14,15 @@ for (const [source, name] of [
     copyFileSync(path.join(root, source), path.join(destination, name))
 }
 const contractDestination = path.join(destination, 'contracts')
+const recipientDestination = path.join(destination, 'recipient')
+mkdirSync(recipientDestination, { recursive: true })
+for (const [source, name] of [
+    ['shielded_pool_js/shielded_pool.wasm', 'shielded_pool.wasm'],
+    ['shielded_pool_final.zkey', 'shielded_pool_final.zkey'],
+    ['verification_key.json', 'verification_key.json'],
+] as const) {
+    copyFileSync(path.join(root, 'build/recipient', source), path.join(recipientDestination, name))
+}
 mkdirSync(contractDestination, { recursive: true })
 for (const name of [
     'shieldedPoolV4',

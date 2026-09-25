@@ -14,9 +14,12 @@ import { VeilV4Miller3 } from '../src/v4/veilV4Miller3'
 import { VeilV4Preparation } from '../src/v4/veilV4Preparation'
 import { ShieldedPoolV4 as CurrentPool } from '../src/v4/shieldedPoolV4'
 import { ShieldedPoolV4 as LegacyPool } from '../src/v4/legacy/shieldedPoolV4'
+import { createHash as createNoteHash, PoolState } from '../src/crypto'
 
 // Historical evidence stays bound to the original, immutable on-chain code.
 const legacy = process.argv.includes('--legacy')
+const recipientOwned = process.argv.includes('--recipient-owned')
+if (legacy && recipientOwned) throw new Error('Historical and recipient-owned manifests are separate')
 const VeilV4Finalizer = legacy ? LegacyFinalizer : CurrentFinalizer
 const ShieldedPoolV4 = legacy ? LegacyPool : CurrentPool
 
@@ -104,16 +107,23 @@ async function main(): Promise<void> {
         vk.gammaAbc[1]
     )
     const preparationInfo = size(preparation)
+    const empty = recipientOwned ? new PoolState(await createNoteHash(), true) : undefined
     const pool = new ShieldedPoolV4(
-        0n,
-        0n,
+        empty?.noteTree.root() ?? 0n,
+        empty?.nullifierTree.root() ?? 0n,
         0n,
         Sha256(toByteString(preparationInfo.codePartHash256))
     )
     const poolInfo = size(pool)
 
     const manifest = {
-        format: 'veil-v4-staged-verifier-chain-v1',
+        format: recipientOwned ? 'veil-v4-recipient-owned-verifier-chain-v2' : 'veil-v4-staged-verifier-chain-v1',
+        ...(recipientOwned ? {
+            protocol: 'veil-recipient-v2-testnet',
+            verificationKeySha256: createHash('sha256').update(await readFile(VKEY)).digest('hex'),
+            circuitSha256: createHash('sha256').update(await readFile('circuits/recipient/shielded_pool.circom')).digest('hex'),
+            deploymentStatus: 'not-deployed-local-candidate',
+        } : {}),
         generatedAt: new Date().toISOString(),
         policyTargetBytes: 500_000,
         preparedLineRanges: {

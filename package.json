@@ -1,6 +1,6 @@
 {
   "name": "veil-bsv",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Replayable ZEC-style shielded pool on BSV with Groth16 notes and nullifiers",
   "license": "MIT",
@@ -8,11 +8,17 @@
   "scripts": {
     "postinstall": "ts-patch install -s",
     "build:circuit": "node --import tsx scripts/build-circuit.ts",
+    "build:circuit:recipient": "node --import tsx scripts/build-recipient-circuit.ts",
+    "test:recipient": "node --import tsx --test --test-force-exit tests/recipient.test.ts tests/recipient-state.test.ts",
+    "test:v4:recipient": "node --import tsx scripts/test-v4-chain.ts --recipient-owned",
+    "test:two-wallet": "node --import tsx scripts/test-two-wallet-browser.ts",
+    "manifest:recipient": "node --import tsx scripts/build-v4-chain.ts --recipient-owned --vkey=build/recipient/verification_key.json --out=artifacts/v4/recipient-chain-manifest.json",
+    "typecheck:ui": "tsc -p ui/tsconfig.json",
     "build:contract": "scrypt-cli compile",
     "build:v4": "scrypt-cli compile -i src/v4/shieldedPoolV4.ts && scrypt-cli compile -i 'src/v4/veilV4*.ts' && node --import tsx scripts/build-v4-chain.ts",
     "verify:v4:deployed": "scrypt-cli compile -i src/v4/legacy/shieldedPoolV4.ts && scrypt-cli compile -i src/v4/legacy/veilV4Finalizer.ts && node --import tsx scripts/build-v4-chain.ts --legacy --vkey=evidence/deployed-verification-key.json --expect=evidence/deployed-v4-chain-manifest.json --out=artifacts/v4/legacy-chain-manifest.json",
     "build": "npm run build:circuit && npm run build:contract",
-    "bounty:replay": "npm run build:circuit && npm run build:v4 && npm run verify:v4:deployed && npm run demo && npm run test:v4 && npm test && npm run typecheck && npm run build:ui",
+    "bounty:replay": "npm run build:circuit && npm run build:circuit:recipient && npm run build:v4 && npm run verify:v4:deployed && npm run demo && npm run test:v4 && npm run test:v4:recipient && npm test && npm run typecheck && npm run typecheck:ui && npm run build:ui && npm run test:two-wallet",
     "release:check": "bash scripts/release-check.sh",
     "release:manifest": "bash scripts/update-manifest.sh",
     "release:package": "bash scripts/package-release.sh",
@@ -66,7 +72,7 @@
     "lifecycle:audit-shield": "node --import tsx scripts/testnet-lifecycle.ts audit-shield",
     "lifecycle:send-shield": "node --import tsx scripts/testnet-lifecycle.ts send-shield",
     "lifecycle:testnet": "node --import tsx scripts/testnet-lifecycle.ts",
-    "test": "tsx --test --test-force-exit tests/**/*.test.ts",
+    "test": "node --import tsx --test --test-force-exit tests/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
