@@ -173,7 +173,7 @@ function render(): void {
                 <span class="status-chip">${icons.check} Protected</span>
               </div>
               <div class="balance"><strong>${formatSats(state.privateBalance)}</strong><span>sats</span></div>
-              <div class="balance-fiat">≈ £${(state.privateBalance * 0.00042).toFixed(2)}</div>
+              <div class="balance-fiat">≈ £${(state.privateBalance * 0.0000042).toFixed(2)} <span>(~mainnet currency)</span></div>
 
               <div class="locked-summary ${state.lockedBalance > 0 ? 'has-lock' : ''}">
                 ${icons.lock}
@@ -290,7 +290,7 @@ function liveDialog(): string {
             <ol class="tx-review-list">
               ${plan.transactions.map((tx, index) => `<li class="${state.liveBroadcastIndex === index ? 'active' : ''}">
                 <div><span>${index + 1}. ${escapeHtml(tx.name)}</span><small>${formatSats(tx.bytes)} B · ${formatSats(tx.feeSatoshis)} sat fee</small></div>
-                <a href="${explorerUrl(tx.txid)}" target="_blank" rel="noreferrer">${tx.txid.slice(0, 12)}…${tx.txid.slice(-10)}</a>
+                <a href="${explorerUrl(tx.txid)}" target="_blank" rel="noopener noreferrer" aria-label="View transaction ${tx.txid} on Whatsonchain testnet in a new tab">${tx.txid.slice(0, 12)}…${tx.txid.slice(-10)}</a>
               </li>`).join('')}
             </ol>
             <p class="review-warning">${escapeHtml(plan.warning)}</p>
