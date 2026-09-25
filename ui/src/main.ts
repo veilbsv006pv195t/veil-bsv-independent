@@ -341,7 +341,7 @@ function liveDialog(): string {
       <section class="live-modal" role="dialog" aria-modal="true" aria-labelledby="live-title">
         <button class="modal-close" id="close-live-modal" aria-label="Close">×</button>
         <span class="live-kicker">DISPOSABLE WALLET · TESTNET ONLY</span>
-        <h2 id="live-title">${state.liveSession ? 'Live wallet · receive and back up' : state.receivingWallet ? 'Independent wallet ready' : 'Unlock or create a testnet wallet'}</h2>
+        <h2 id="live-title">${state.liveSession ? 'Live wallet · receive and back up' : state.receivingWallet ? 'Independent wallet ready' : 'Restore or set up a testnet wallet'}</h2>
         ${state.liveSession || state.receivingWallet ? `
           <p>Private keys and notes stay in this tab and your encrypted backup. Keep both the backup file and its passphrase safe. Never reload during preparation or a partially submitted chain.</p>
           <div class="unlocked-address"><span>Testnet address</span><strong>${escapeHtml(state.liveAddress)}</strong></div>
@@ -370,21 +370,24 @@ function liveDialog(): string {
               <button class="secondary-button" id="bind-funding">Check mined funding output</button>
             </details>
           ${state.liveSession ? '<button class="primary-button" id="use-live-wallet">Choose an action →</button>' : ''}
-          <button class="secondary-button" id="lock-live-wallet">Lock and clear wallet</button>
+          <button class="secondary-button" id="lock-live-wallet">Lock wallet and return to Restore</button>
+          <p>Save the latest encrypted backup first. Returning to Restore clears the current wallet from this tab; it does not move any funds.</p>
         ` : `
-          <p>The separately delivered password decrypts the disposable wallet locally. It is never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
-          <label class="field-label" for="live-password">Live-wallet password</label>
-          <label class="live-confirm"><input id="guided-demo-choice" type="checkbox" ${state.guidedRequested ? 'checked' : ''} /> Guided demo: create a separate recipient on first setup</label>
-          <p>If you have used this funded wallet already, restore its newest encrypted backup below instead of unlocking the original funding envelope. A reload never restores private notes from the website password.</p>
-          <div class="text-field"><input id="live-password" type="password" autocomplete="current-password" spellcheck="false" /></div>
-          <button class="primary-button" id="unlock-live-wallet" ${state.liveUnlocking ? 'disabled' : ''}>
-            ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : 'Unlock in this browser →'}
-          </button>
-          <button class="secondary-button" id="create-receiving-wallet">Create independent receiving wallet</button>
+          <h3>Returning user — restore your backup</h3>
+          <p>Already used Veil? Restore your latest encrypted wallet backup here. Enter its backup passphrase first, then choose the file to restore. Do not select an encrypted payment file.</p>
           <label class="field-label" for="restore-password">Backup passphrase</label>
           <div class="text-field"><input id="restore-password" type="password" autocomplete="current-password" /></div>
+          <label class="live-confirm"><input id="guided-demo-choice" type="checkbox" ${state.guidedRequested ? 'checked' : ''} /> Guided demo: create a separate recipient on first setup</label>
           <label class="field-label" for="restore-backup">Restore encrypted wallet backup</label>
           <input id="restore-backup" type="file" accept=".json,application/json" />
+          <h3 class="setup-divider">First-time setup only</h3>
+          <p>The separately delivered live-wallet password opens the original funding wallet, not your saved private notes. If you have used it already, restore above instead. Wallet data is decrypted locally; passwords are never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
+          <label class="field-label" for="live-password">First-time live-wallet password</label>
+          <div class="text-field"><input id="live-password" type="password" autocomplete="current-password" spellcheck="false" /></div>
+          <button class="primary-button" id="unlock-live-wallet" ${state.liveUnlocking ? 'disabled' : ''}>
+            ${state.liveUnlocking ? '<span class="spinner"></span> Unlocking and checking testnet…' : 'First-time unlock →'}
+          </button>
+          <button class="secondary-button" id="create-receiving-wallet">Create independent receiving wallet</button>
         `}
         ${state.liveError ? `<p class="live-error" role="alert">${escapeHtml(state.liveError)}</p>` : ''}
         <p class="live-safety">Anyone with the password controls this disposable testnet wallet. Never use this mode with mainnet funds.</p>
@@ -606,7 +609,8 @@ async function unlockBrowserWallet(): Promise<void> {
 }
 
 function clearLiveWallet(): void {
-    if (state.busy || state.pendingLivePlan || state.guidedPolling) return
+    if (state.busy || state.liveUnlocking || state.pendingLivePlan || state.guidedPolling) return
+    if (state.guided?.pending) { state.liveError = 'Wait for mining and wallet synchronization before returning to Restore.'; state.liveDialogOpen = true; render(); return }
     if (state.backupDirty) { state.liveError = 'Download an up-to-date encrypted wallet backup before clearing this tab.'; state.liveDialogOpen = true; render(); return }
     state.liveSession = null
     state.guided = null
@@ -616,7 +620,7 @@ function clearLiveWallet(): void {
     state.fundingChecked = false
     state.liveAddress = ''
     state.connected = false
-    state.liveDialogOpen = false
+    state.liveDialogOpen = true
     state.pendingLivePlan = null
     state.liveConfirm = false
     state.liveError = ''
