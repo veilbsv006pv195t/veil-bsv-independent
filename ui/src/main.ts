@@ -12,6 +12,51 @@ import { canUnlockOriginalWallet, canCreateGuidedRecipient } from './wallet-entr
 import { Stopwatches, elapsed } from './stopwatches'
 import { MAX_BACKUP_FILE_BYTES } from '../../src/backupCompression'
 import { encodeBackupFile, decodeBackupFile } from '../../src/backupFile'
+import { AutoBackup } from './auto-backup'
+
+const backups = new AutoBackup()
+let backupDownload: { url: string; name: string; revision: number } | null = null
+function clearBackupDownload(): void {
+    if (backupDownload) URL.revokeObjectURL(backupDownload.url)
+    backupDownload = null
+}
+function walletChanged(): void {
+    state.backupDirty = true
+    backups.changed()
+    clearBackupDownload()
+}
+function backupControls(): string {
+    const current = backupDownload?.revision === backups.revision ? backupDownload : null
+    return `<strong>Encrypted backups · ${backups.enabled ? 'Automatic for this session' : 'Manual'}</strong>
+      <p role="status">${escapeHtml(backups.status)}</p>
+      ${current ? `<p>Latest file: ${escapeHtml(current.name)}</p><a href="${current.url}" download="${escapeHtml(current.name)}">Download latest file again</a>` : ''}
+      ${backups.canConfirm ? '<button class="secondary-button" data-confirm-backup>I checked Downloads: this backup is saved</button>' : ''}
+      ${backups.enabled && !backups.busy && !current ? '<button class="secondary-button" data-retry-backup>Retry automatic backup now</button>' : ''}
+      <p>No automatic disk-write receipt is available. Confirmation is your acknowledgment; files must be kept outside temporary browser storage.</p>`
+}
+function updateBackupControls(): void {
+    const manual = document.querySelector('#save-wallet-backup')
+    if (manual) manual.textContent = `Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}`
+    document.querySelectorAll('[data-backup-controls]').forEach(node => {
+        node.innerHTML = backupControls()
+        node.querySelector('[data-confirm-backup]')?.addEventListener('click', () => {
+            if (backups.confirm()) {
+                state.backupDirty = false
+                state.liveError = ''
+                updateBackupControls()
+                showToast('Saved backup acknowledged. Mining/handoff must also finish before the next action.')
+            }
+        })
+        node.querySelector('[data-retry-backup]')?.addEventListener('click', () => {
+            if (state.busy || state.liveUnlocking || state.guidedPolling || state.pendingLivePlan) { showToast('Wait for the current wallet operation to finish'); return }
+            void saveBackup(undefined, true).catch(() => {})
+        })
+    })
+}
+async function autoBackupTick(): Promise<void> {
+    if (!backups.due || state.busy || state.liveUnlocking || state.guidedPolling || state.pendingLivePlan || (!state.liveSession && !state.receivingWallet)) return
+    try { await saveBackup(undefined, true) } catch { /* Status stays visible; retry is explicit. */ }
+}
 
 const timers = new Stopwatches()
 let foregroundTiming: number | null = null
@@ -231,10 +276,11 @@ function render(): void {
             <details><summary>All operation and stage timings</summary><p>Local to this tab; wall-clock elapsed time includes review and network waits. Download timers end when offered, not when saved to disk. A blocked browser may delay display updates. Export before reloading.</p><ol id="timing-records"></ol></details>
           </aside>
           <aside class="version-notice" aria-label="Version information">
-            <strong>v0.3.0 · Two-wallet testnet candidate</strong>
-            <span>New protocol; do not import old pool notes. No contract is deployed merely by opening this page.</span>
-            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/" target="_blank" rel="noopener noreferrer">Open previous version for comparison ↗</a>
+            <strong>v0.3.1 · Automatic encrypted backup candidate</strong>
+            <span>Compatible with v0.3.0 backups and pools. Restore your latest backup; never operate the same wallet in both versions. Opening this page does not deploy or broadcast.</span>
+            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/v0.3.0/" target="_blank" rel="noopener noreferrer">Open v0.3.0 for comparison ↗</a>
           </aside>
+          ${state.liveSession || state.receivingWallet ? '<aside class="version-notice" data-backup-controls aria-label="Encrypted backup status"></aside>' : ''}
           ${state.guided ? `<aside class="version-notice guided-controls" aria-label="Guided two-wallet demo">
             <strong>Guided demo · ${state.guided.active === 'sender' ? 'Sender' : 'Demo recipient'} wallet</strong>
             <span>Two separate keys in this browser for demonstration. Back up both together. Not a separately controlled third-party wallet.</span>
@@ -353,6 +399,7 @@ function render(): void {
       ${state.liveDialogOpen || state.pendingLivePlan ? liveDialog() : ''}
     `
     wireEvents()
+    updateBackupControls()
     const modal = document.querySelector<HTMLElement>('.live-modal')
     if (modal) {
         modal.classList.toggle('expanded', modalExpanded)
@@ -417,6 +464,11 @@ function liveDialog(): string {
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
           <button class="secondary-button" id="save-wallet-backup">Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}</button>
+          <label class="live-confirm"><input type="checkbox" id="auto-backup-consent" /> Keep this backup passphrase in memory for this session and request encrypted downloads automatically after wallet changes. I understand the browser may block downloads and I must check they are saved.</label>
+          <button class="secondary-button" id="enable-auto-backup" ${backups.busy ? 'disabled' : ''}>Enable automatic backups / change passphrase</button>
+          ${backups.enabled ? '<button class="secondary-button" id="disable-auto-backup">Disable automatic backups and forget passphrase</button>' : ''}
+          <div data-backup-controls></div>
+          <p>Opt-in only; no passphrase or plaintext backup is written to browser storage or uploaded. Disabling, locking, restoring or leaving this page ends automatic mode. JavaScript cannot guarantee immediate erasure from memory. Backups do not resume a partially submitted chain: keep this tab open until submission finishes.</p>
           ${state.guided ? '<p>This one encrypted file includes BOTH keys, private notes and any pending handoff. Keep the newest download; the website password alone does not recover these notes. Restore this file after a reload—do not unlock the original funding envelope again.</p>' : `
             ${state.restoredSingle ? '<p role="status">Single-wallet backup restored. No recipient keys were created or replaced. Keep the original backup. Do not transact from another tab using this wallet.</p>' : ''}
             ${hasGuidedMarker() && state.restoredSingle ? '<p>A previous guided-setup marker exists in this browser. It does not identify a wallet or prove a recipient was saved. Restore a combined backup if you have one; creating a new recipient will not recover an earlier recipient.</p><label class="live-confirm"><input id="confirm-new-recipient" type="checkbox" /> I have no existing recipient to recover for this demo and want to create a NEW recipient. I will keep my original backup and save the combined backup.</label>' : ''}
@@ -505,7 +557,7 @@ async function enableGuided(confirmedNewRecipient = false): Promise<void> {
         recipient: { fundingChecked: false, activities: [] },
     }
     rememberGuided()
-    state.backupDirty = true
+    walletChanged()
     state.guidedMessage = 'Separate recipient created. Download the combined two-wallet backup before proceeding.'
     if (state.action === 'send') state.recipient = pair.defaultRecipient()
 }
@@ -558,7 +610,7 @@ async function checkGuidedHandoff(): Promise<void> {
         if (changed) {
             const timing = miningTimings.get(pending.txid)
             if (timing !== undefined) { timers.finish(timing, 'ARC reports mined; wallets synchronized'); miningTimings.delete(pending.txid) }
-            state.backupDirty = true
+            walletChanged()
             if (pending.payment) state.guidedViews[peerRole].activities.unshift({
                 kind: 'send', received: true, title: 'Received privately on testnet',
                 detail: `ARC reports MINED · ${pending.txid.slice(0, 12)}…`,
@@ -668,7 +720,7 @@ async function unlockBrowserWallet(): Promise<void> {
         state.liveAddress = wallet.address
         state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
         state.fundingChecked = fundingChecked
-        state.backupDirty = true
+        walletChanged()
         state.connected = true
         state.publicBalance = wallet.funding.satoshis
         state.privateBalance = 0
@@ -694,6 +746,8 @@ function clearLiveWallet(): void {
     if (state.busy || state.liveUnlocking || state.pendingLivePlan || state.guidedPolling) return
     if (state.guided?.pending) { state.liveError = 'Wait for mining and wallet synchronization before returning to Restore.'; state.liveDialogOpen = true; render(); return }
     if (state.backupDirty) { state.liveError = 'Download an up-to-date encrypted wallet backup before clearing this tab.'; state.liveDialogOpen = true; render(); return }
+    backups.restored()
+    clearBackupDownload()
     state.liveSession = null
     state.guided = null
     state.restoredSingle = false
@@ -746,32 +800,43 @@ async function adoptSession(session: LiveVeilSession): Promise<void> {
     state.privateBalance = session.privateBalance()
     state.publicBalance = session.fundingBalance()
     state.connected = true
-    state.backupDirty = true
+    walletChanged()
     state.currentHeight = height
     state.lockedBalance = session.lockedBalance(state.currentHeight)
     state.activities = []
 }
-async function saveBackup(password: string): Promise<void> {
-    timers.phase(foregroundTiming, 'Serialize, deduplicate, compress and encrypt')
-    syncGuidedSlot()
-    const payload = state.guided?.backupPayload() ?? state.liveSession?.backupPayload() ?? {
-        protocol: RECIPIENT_PROTOCOL, wallet: state.receivingWallet, pool: null, notes: [],
-    }
-    const encrypted = await encryptBackup(payload, password)
-    timers.phase(foregroundTiming, 'Authenticate and decompress backup for verification')
-    // Test authentication before offering the file. The user still needs to
-    // retain both the downloaded file and passphrase outside this browser.
-    const file = encodeBackupFile(encrypted)
-    // Verify the exact binary container offered for download, not only its envelope.
-    await decryptBackup(decodeBackupFile(file), password)
-    const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = state.guided ? 'veil-encrypted-two-wallet-backup.veil' : 'veil-encrypted-wallet-backup.veil'
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    state.backupDirty = false
-    showToast(`Compact encrypted backup offered: ${(file.length / 1_000_000).toFixed(2)} MB`)
+async function saveBackup(password?: string, automatic = false): Promise<void> {
+    if (backups.busy) return
+    const timing = automatic ? timers.start('Automatic encrypted backup', 'Snapshot, compress and encrypt') : foregroundTiming
+    try {
+        await backups.request(async secret => {
+            updateBackupControls()
+            syncGuidedSlot()
+            const payload = state.guided?.backupPayload() ?? state.liveSession?.backupPayload() ?? {
+                protocol: RECIPIENT_PROTOCOL, wallet: state.receivingWallet, pool: null, notes: [],
+            }
+            // encryptBackup serializes synchronously before its first await.
+            const encrypted = await encryptBackup(payload, secret)
+            timers.phase(timing, 'Authenticate exact binary backup')
+            const file = encodeBackupFile(encrypted)
+            await decryptBackup(decodeBackupFile(file), secret)
+            return file
+        }, (file, revision) => {
+            clearBackupDownload()
+            const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }))
+            const name = `veil-${state.guided ? 'two-wallet' : 'wallet'}-${new Date().toISOString().replace(/[:.]/g, '-')}-r${revision}-${crypto.randomUUID().slice(0, 8)}.veil`
+            backupDownload = { url, name, revision }
+            const link = document.createElement('a')
+            link.href = url; link.download = name
+            document.body.append(link)
+            try { link.click() } finally { link.remove() }
+            showToast(`Encrypted backup download requested: ${(file.length / 1_000_000).toFixed(2)} MB. Check Downloads.`)
+        }, password)
+        if (automatic) timers.finish(timing, backups.canConfirm ? 'Download requested — saved file unconfirmed' : 'Superseded or cancelled')
+    } catch (error) {
+        if (automatic) timers.finish(timing, 'Backup failed — manual retry required')
+        throw error
+    } finally { updateBackupControls() }
 }
 async function restoreWallet(envelope: WalletBackup, password: string): Promise<void> {
     timers.phase(foregroundTiming, 'Authenticate, decompress and decode backup')
@@ -791,6 +856,8 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         state.guidedMessage = pair.pending ? 'Restored both wallets and pending handoff. Checking mining automatically.' : 'Restored both wallets from the encrypted backup; no replacement keys generated.'
         if (pair.pending) miningTimings.set(pair.pending.txid, timers.start('Restored pending handoff', 'Mining/handoff wait since restore; earlier duration unknown'))
         state.backupDirty = false
+        backups.restored()
+        clearBackupDownload()
         return
     }
     if (payload?.protocol !== RECIPIENT_PROTOCOL || !Array.isArray(payload.notes)) throw new Error('Unsupported backup payload')
@@ -811,6 +878,8 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         await adoptSession(await LiveVeilSession.restoreBackup(payload, updateProofProgress))
     }
     state.backupDirty = false
+    backups.restored()
+    clearBackupDownload()
     // Restoring must reproduce the saved wallet, never generate replacement keys.
     // The shared marker remains intact and still prevents first-time unlock.
     state.restoredSingle = true
@@ -835,7 +904,7 @@ async function prepareLiveAction(amount: number, unlockHeight: number): Promise<
     render()
     try {
         state.guided?.assertReady()
-        if (state.guided && state.backupDirty) throw new Error('Download the latest two-wallet backup before preparing another action')
+        if (state.backupDirty) throw new Error('Wallet recovery data changed. Save the latest encrypted backup and confirm it in the backup panel before preparing another action')
         const plan = await session.prepare(
             state.action,
             amount,
@@ -892,7 +961,7 @@ async function broadcastLivePlan(): Promise<void> {
         state.privateBalance = plan.newPrivateBalance
         state.lockedBalance = plan.newLockedBalance
         state.publicBalance = session.fundingBalance()
-        state.backupDirty = true
+        walletChanged()
         const finalTx = plan.transactions.at(-1)!
         if (actionTiming !== null) {
             timers.phase(actionTiming, state.guided ? 'Waiting for mining and automatic handoff' : 'Waiting for mining')
@@ -921,9 +990,9 @@ async function broadcastLivePlan(): Promise<void> {
         state.liveBroadcastIndex = -1
         state.busy = false
         render()
-        state.liveDialogOpen = true
+        state.liveDialogOpen = !backups.enabled
         render()
-        showToast(state.guided ? 'ARC accepted. Save the combined backup, then close this dialog to check mining and synchronize both wallets.' : plan.action === 'send' ? 'ARC accepted. Save your backup and encrypted payment file; recipient imports after mining.' : 'ARC accepted. Save an updated encrypted backup and share the pool update with the other wallet.')
+        showToast(backups.enabled ? 'ARC accepted. Automatic backup queued; keep this page open for mining and synchronization.' : state.guided ? 'ARC accepted. Save the combined backup, then close this dialog to check mining and synchronize both wallets.' : plan.action === 'send' ? 'ARC accepted. Save your backup and encrypted payment file; recipient imports after mining.' : 'ARC accepted. Save an updated encrypted backup and share the pool update with the other wallet.')
     } catch (error) {
         timers.phase(actionTiming, 'Submission interrupted — waiting for exact-chain retry')
         state.busy = false
@@ -1142,7 +1211,7 @@ function wireEvents(): void {
         state.publicBalance = 0
         state.lockedBalance = 0
         state.activities = []
-        state.backupDirty = true
+        walletChanged()
         state.fundingChecked = false
         state.connected = true
     }, 'Create independent receiving wallet'))
@@ -1155,6 +1224,26 @@ function wireEvents(): void {
         const password = input.value
         input.value = ''
         void walletTask(() => saveBackup(password), state.guided ? 'Two-wallet backup download' : 'Single-wallet backup download')
+    })
+    document.querySelector('#enable-auto-backup')?.addEventListener('click', () => {
+        if (backups.busy || state.busy || state.liveUnlocking) return
+        const consent = document.querySelector<HTMLInputElement>('#auto-backup-consent')
+        const input = document.querySelector<HTMLInputElement>('#backup-password')!
+        if (!consent?.checked) { showToast('Read and tick the automatic-backup consent first'); return }
+        try {
+            backups.enable(input.value)
+            input.value = ''
+            state.backupDirty = true
+            clearBackupDownload()
+            render()
+            void autoBackupTick()
+        } catch (error) { input.value = ''; showToast(error instanceof Error ? error.message : 'Could not enable automatic backups') }
+    })
+    document.querySelector('#disable-auto-backup')?.addEventListener('click', () => {
+        backups.disable()
+        // Update only backup UI while another operation may be using inputs.
+        updateBackupControls()
+        showToast('Automatic backups disabled; session passphrase reference cleared')
     })
     document.querySelector<HTMLInputElement>('#restore-backup')?.addEventListener('change', event => {
         const file = (event.target as HTMLInputElement).files?.[0]
@@ -1209,7 +1298,7 @@ function wireEvents(): void {
                 state.publicBalance = state.receivingWallet.funding.satoshis
                 state.fundingChecked = true
             }
-            state.backupDirty = true
+            walletChanged()
         }, 'Check and bind fee funding')
     })
     document.querySelector('#start-new-pool')?.addEventListener('click', () => void walletTask(async () => {
@@ -1325,3 +1414,12 @@ window.setInterval(() => { updateUsdDisplay(); void refreshUsd() }, 5 * 60_000)
 window.setInterval(() => void checkGuidedHandoff(), 30_000)
 window.setInterval(updateTimers, 250)
 window.setInterval(() => void checkMiningTimings(), 30_000)
+window.setInterval(() => void autoBackupTick(), 1_000)
+window.addEventListener('beforeunload', event => {
+    if (state.backupDirty || state.pendingLivePlan || state.guided?.pending || backups.busy) {
+        event.preventDefault()
+        event.returnValue = ''
+    }
+})
+window.addEventListener('pagehide', () => { backups.disable(); backups.offeredRevision = -1; clearBackupDownload() })
+window.addEventListener('pageshow', updateBackupControls)
