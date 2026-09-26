@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AutoBackup, backupChoice } from '../ui/src/auto-backup'
+import { readFileSync } from 'node:fs'
+import { AutoBackup, backupChoice, backupPreparationMessage } from '../ui/src/auto-backup'
 import { encryptBackup, decryptBackup } from '../src/walletBackup'
 import { encodeBackupFile, decodeBackupFile } from '../src/backupFile'
 const password = 'synthetic-test-passphrase-only-123'
@@ -22,6 +23,7 @@ test('setup choices are exclusive, but active automatic mode allows an on-demand
 })
 test('on-demand export retains automatic mode and its passphrase for the next wallet change', async () => {
     const backups = new AutoBackup()
+    backups.changed()
     backups.enable(password)
     const files: Uint8Array[] = []
     let payload = { format: 'synthetic two-wallet fixture', wallets: ['sender', 'recipient'], revision: 1 }
@@ -57,7 +59,7 @@ test('opt-in, download request, explicit receipt and changed wallet are distinct
     b.changed(); assert.equal(b.confirm(), false); assert.equal(b.due, true)
 })
 test('auto request produces a restorable authenticated compact file; another mutation produces a fresh encrypted revision', async () => {
-    const b = new AutoBackup(); b.enable(password)
+    const b = new AutoBackup(); b.changed(); b.enable(password)
     let content = { fixture: 'synthetic unfunded state only', notes: ['pending'] }
     const files: Uint8Array[] = []
     const build = async (p: string) => {
@@ -85,7 +87,7 @@ test('in-flight stale snapshot cannot confirm newer state and is requeued', asyn
     assert.equal(offers, 0); assert.equal(b.confirm(), false); assert.equal(b.due, true)
 })
 test('restore/disable cancels offers; failures do not create retry storms or receipts', async () => {
-    const b = new AutoBackup(); b.enable(password)
+    const b = new AutoBackup(); b.changed(); b.enable(password)
     await assert.rejects(b.request(async () => { throw Error('secret must not reach UI') }, () => assert.fail()))
     assert.equal(b.due, false); assert.equal(b.confirm(), false); assert.equal(b.dirty, true)
     await b.request(async () => { b.restored(); return 1 }, () => assert.fail())
@@ -93,4 +95,73 @@ test('restore/disable cancels offers; failures do not create retry storms or rec
     b.changed()
     await b.request(async p => { assert.equal(p, password); return 1 }, () => {}, password)
     assert.equal(b.enabled, false); assert.equal(b.dirty, true); assert.equal(b.confirm(), true)
+})
+
+test('restore then enable or change passphrase preserves the existing recovery checkpoint', async () => {
+    const b = new AutoBackup(); b.restored()
+    const revision = b.revision
+    for (const secret of [password, password + '-changed']) {
+        b.enable(secret)
+        assert.equal(b.revision, revision)
+        assert.equal(b.confirmedRevision, revision)
+        assert.equal(b.dirty, false); assert.equal(b.due, false)
+        assert.equal(b.canConfirm, false)
+        assert.equal(backupPreparationMessage(b.dirty, b.busy, b.canConfirm, b.enabled), null)
+        b.disable()
+    }
+    b.enable(password)
+    await assert.rejects(b.request(async () => { throw Error('blocked optional copy') }, () => assert.fail()))
+    assert.equal(b.dirty, false); assert.equal(b.due, false)
+    assert.match(b.status, /backup remains valid/)
+    b.changed()
+    const changedRevision = b.revision
+    b.disable(); b.enable(password)
+    assert.equal(b.revision, changedRevision)
+    assert.equal(b.dirty, true); assert.equal(b.due, true)
+    let offers = 0
+    await b.request(async () => 'encrypted', () => offers++)
+    assert.equal(offers, 1); assert.equal(b.due, false)
+    assert.equal(b.dirty, true); assert.equal(b.canConfirm, true)
+    assert.equal(b.confirm(), true)
+    assert.equal(b.dirty, false)
+    b.enable(password + '-another-change')
+    assert.equal(b.due, false); assert.equal(b.dirty, false)
+})
+
+test('changing the automatic passphrase cancels an in-flight export without clearing dirty data', async () => {
+    const b = new AutoBackup(); b.changed(); b.enable(password)
+    let release!: () => void
+    const wait = new Promise<void>(resolve => { release = resolve })
+    const running = b.request(async () => { await wait; return 'old-key-file' }, () => assert.fail())
+    b.enable(password + '-new'); release(); await running
+    assert.equal(b.dirty, true); assert.equal(b.due, true); assert.equal(b.canConfirm, false)
+    await b.request(async secret => { assert.equal(secret, password + '-new'); return 'new-key-file' }, () => {})
+    assert.equal(b.canConfirm, true)
+})
+
+test('preparation prerequisite explains real backup work without requesting another upload', () => {
+    assert.equal(backupPreparationMessage(false, false, false, true), null)
+    assert.match(backupPreparationMessage(true, true, false, true)!, /Preparing your updated/)
+    assert.match(backupPreparationMessage(true, false, true, true)!, /confirm it in Backup status/)
+    assert.match(backupPreparationMessage(true, false, false, true)!, /queued or needs retry/)
+    assert.match(backupPreparationMessage(true, false, false, false)!, /Download and save/)
+    for (const automatic of [false, true]) {
+        assert.match(backupPreparationMessage(true, false, false, automatic)!, /No upload is needed/)
+    }
+})
+
+test('UI checks recovery before starting preparation and refreshes action availability after confirmation and height changes', () => {
+    const source = readFileSync('ui/src/main.ts', 'utf8')
+    const prepare = source.slice(source.indexOf('async function prepareLiveAction('), source.indexOf('async function broadcastLivePlan('))
+    assert.ok(prepare.indexOf('if (recoveryPreparationMessage())') < prepare.indexOf('timers.start('))
+    assert.doesNotMatch(prepare, /throw new Error\('Wallet recovery data changed/)
+    const update = source.slice(source.indexOf('function updateBackupControls('), source.indexOf('async function autoBackupTick('))
+    assert.match(update, /updateActionAvailability\(\)/)
+    assert.match(update, /backups\.confirm\(\)[\s\S]*state\.backupDirty = false[\s\S]*updateBackupControls\(\)/)
+    const height = source.slice(source.indexOf('function updateHeightDisplay('), source.indexOf('function render('))
+    assert.match(height, /updateActionAvailability\(\)/)
+    const enable = source.slice(source.indexOf("document.querySelector('#enable-auto-backup')"), source.indexOf("document.querySelector('#disable-auto-backup')", source.indexOf("document.querySelector('#enable-auto-backup')")))
+    assert.match(enable, /state\.backupDirty = backups\.dirty/)
+    assert.doesNotMatch(enable, /walletChanged\(\)|state\.backupDirty = true/)
+    assert.match(source, /id="action-backup-gate"[\s\S]*id="review-action-backup"/)
 })

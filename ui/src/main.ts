@@ -12,7 +12,7 @@ import { canUnlockOriginalWallet, canCreateGuidedRecipient } from './wallet-entr
 import { Stopwatches, elapsed } from './stopwatches'
 import { MAX_BACKUP_FILE_BYTES } from '../../src/backupCompression'
 import { encodeBackupFile, decodeBackupFile } from '../../src/backupFile'
-import { AutoBackup, backupChoice } from './auto-backup'
+import { AutoBackup, backupChoice, backupPreparationMessage } from './auto-backup'
 import { HeightTracker, resolveLockHeight, lockHeightLabel } from './lock-height'
 
 const heights = new HeightTracker(testnetHeight, updateHeightDisplay)
@@ -35,7 +35,7 @@ function backupControls(): string {
       <p role="status">${escapeHtml(backups.status)}</p>
       ${current ? `<p>Latest file: ${escapeHtml(current.name)}</p><a href="${current.url}" download="${escapeHtml(current.name)}">Download latest file again</a>` : ''}
       ${backups.canConfirm ? '<button class="secondary-button" data-confirm-backup>I checked Downloads: this backup is saved</button>' : ''}
-      ${backups.enabled && !backups.busy && !current ? '<button class="secondary-button" data-retry-backup>Retry automatic backup now</button>' : ''}
+      ${backups.enabled && backups.dirty && !backups.busy && !current ? '<button class="secondary-button" data-retry-backup>Retry automatic backup now</button>' : ''}
       <p>No automatic disk-write receipt is available. Confirmation is your acknowledgment; files must be kept outside temporary browser storage.</p>`
 }
 function updateBackupChoice(): void {
@@ -53,6 +53,7 @@ function updateBackupChoice(): void {
 }
 function updateBackupControls(): void {
     updateBackupChoice()
+    updateActionAvailability()
     const manual = document.querySelector('#save-wallet-backup')
     if (manual) manual.textContent = `Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${backups.enabled ? ' now' : ''}${state.backupDirty ? ' · required' : ''}`
     document.querySelectorAll('[data-backup-controls]').forEach(node => {
@@ -254,6 +255,31 @@ function heightStatus(): string {
     return `Current testnet height: ${formatSats(heights.height)}`
 }
 
+function recoveryPreparationMessage(): string | null {
+    if (!state.liveSession) return null
+    return backupPreparationMessage(state.backupDirty || backups.dirty, backups.busy, backups.canConfirm, backups.enabled)
+}
+
+function reviewBackupStatus(): void {
+    document.querySelector<HTMLElement>('[aria-label="Encrypted backup status"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function updateActionAvailability(): void {
+    const message = recoveryPreparationMessage()
+    const gate = document.querySelector<HTMLElement>('#action-backup-gate')
+    if (gate) {
+        gate.hidden = !message
+        const text = gate.querySelector('p')
+        if (text) text.textContent = message ?? ''
+    }
+    const button = document.querySelector<HTMLButtonElement>('#submit-action')
+    if (!button) return
+    button.disabled = state.busy || state.liveUnlocking || state.guidedPolling || !!state.guided?.pending || !!state.pendingLivePlan || !!(state.guided && !state.liveSession) || !!message || (state.action === 'lock' && (heights.loading || heights.height === null))
+    if (!state.busy) button.innerHTML = message
+        ? 'Backup confirmation needed'
+        : `${state.liveSession ? 'Prepare ' + copy[state.action].cta.toLowerCase() : copy[state.action].cta} <span>→</span>`
+}
+
 function updateHeightDisplay(): void {
     const status = document.querySelector('#height-status')
     if (status) status.innerHTML = heightStatus()
@@ -268,8 +294,7 @@ function updateHeightDisplay(): void {
         }
         preview.textContent = text
     }
-    const button = document.querySelector<HTMLButtonElement>('#submit-action')
-    if (button && state.action === 'lock') button.disabled = state.busy || state.guidedPolling || !!state.guided?.pending || !!(state.guided && !state.liveSession) || heights.loading || heights.height === null
+    updateActionAvailability()
     if (heights.height !== null && state.liveSession) {
         state.lockedBalance = state.liveSession.lockedBalance(heights.height)
         const locked = document.querySelector('#locked-balance')
@@ -322,9 +347,9 @@ function render(): void {
             <details><summary>All operation and stage timings</summary><p>Local to this tab; wall-clock elapsed time includes review and network waits. Download timers end when offered, not when saved to disk. A blocked browser may delay display updates. Export before reloading.</p><ol id="timing-records"></ol></details>
           </aside>
           <aside class="version-notice" aria-label="Version information">
-            <strong>v0.3.2 · Verified testnet lock heights</strong>
-            <span>Compatible with v0.3.0 and v0.3.1 backups and pools. Restore your latest backup; never operate the same wallet in both versions. Opening this page does not deploy or broadcast.</span>
-            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/v0.3.1/" target="_blank" rel="noopener noreferrer">Open v0.3.1 for comparison ↗</a>
+            <strong>v0.3.3 · Recovery-aware automatic backups</strong>
+            <span>Compatible with v0.3.0–v0.3.2 backups and pools. Restore your latest backup once; enabling automatic backups preserves that recovery checkpoint. Never operate the same wallet in both versions. Opening this page does not deploy or broadcast.</span>
+            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/v0.3.2/" target="_blank" rel="noopener noreferrer">Open v0.3.2 for comparison ↗</a>
           </aside>
           ${state.liveSession || state.receivingWallet ? '<aside class="version-notice" data-backup-controls aria-label="Encrypted backup status"></aside>' : ''}
           ${state.guided ? `<aside class="version-notice guided-controls" aria-label="Guided two-wallet demo">
@@ -407,6 +432,9 @@ function render(): void {
                 <p id="resolved-height" class="height-help" role="status"></p>
               ` : ''}
 
+              <aside id="action-backup-gate" class="backup-preparation-notice" role="status" hidden>
+                <p></p><button class="secondary-button" id="review-action-backup" type="button">Review Backup status ↑</button>
+              </aside>
               <button class="primary-button" id="submit-action" ${state.busy || state.guidedPolling || state.guided?.pending || (state.guided && !live) ? 'disabled' : ''}>
                 ${state.busy
                     ? '<span class="spinner"></span> Preparing audited transaction chain…'
@@ -944,6 +972,9 @@ window.addEventListener('beforeunload', event => {
 async function prepareLiveAction(amount: number, unlockHeight: string): Promise<boolean> {
     const session = state.liveSession
     if (!session) return false
+    // Check recovery before starting a proof/transaction timer. This is a
+    // recoverability prerequisite, not a failed transaction preparation.
+    if (recoveryPreparationMessage()) { updateActionAvailability(); reviewBackupStatus(); return false }
     actionTiming = timers.start(`${state.action === 'shield' ? 'Add' : state.action} · live testnet`, 'Prepare')
     foregroundTiming = actionTiming
     state.busy = true
@@ -953,7 +984,6 @@ async function prepareLiveAction(amount: number, unlockHeight: string): Promise<
     render()
     try {
         state.guided?.assertReady()
-        if (state.backupDirty) throw new Error('Wallet recovery data changed. Save the latest encrypted backup and confirm it in the backup panel before preparing another action')
         const plan = await session.prepare(
             state.action,
             amount,
@@ -1052,6 +1082,7 @@ async function broadcastLivePlan(): Promise<void> {
 
 async function submit(): Promise<boolean> {
     if (state.busy || state.liveUnlocking || state.pendingLivePlan) return false
+    if (recoveryPreparationMessage()) { updateActionAvailability(); reviewBackupStatus(); return false }
     if (state.guided?.pending || state.guidedPolling) { showToast('Wait for mining and wallet synchronization'); return false }
     if (state.guided?.active === 'recipient' && !state.liveSession) { showToast('Waiting for a mined payment to the demo recipient'); return false }
     if (state.receivingWallet) { state.liveDialogOpen = true; render(); showToast('Import a payment or prepare a funded pool first'); return false }
@@ -1291,7 +1322,7 @@ function wireEvents(): void {
         try {
             backups.enable(input.value)
             input.value = ''
-            state.backupDirty = true
+            state.backupDirty = backups.dirty
             clearBackupDownload()
             render()
             void autoBackupTick()
@@ -1420,6 +1451,7 @@ function wireEvents(): void {
     document.querySelector('#submit-action')?.addEventListener('click', () => {
         void submit()
     })
+    document.querySelector('#review-action-backup')?.addEventListener('click', reviewBackupStatus)
     document.querySelector('#proof-info')?.addEventListener('click', () => {
         showToast('Notes hide balances. Nullifiers stop double-spends. Block locks are proven privately.')
     })

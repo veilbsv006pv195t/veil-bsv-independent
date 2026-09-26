@@ -14,6 +14,15 @@ export function backupChoice(selected: boolean, enabled: boolean, busy: boolean)
     }
 }
 
+export function backupPreparationMessage(dirty: boolean, busy: boolean, canConfirm: boolean, automatic: boolean): string | null {
+    if (!dirty) return null
+    if (busy) return 'Preparing your updated encrypted backup. Wait for the download, save it, then confirm it in Backup status. No upload is needed.'
+    if (canConfirm) return 'Recovery data changed. Check that the latest backup file is saved, then confirm it in Backup status to enable preparation. No upload is needed.'
+    return automatic
+        ? 'Recovery data changed. An automatic backup is queued or needs retry. Review Backup status before preparing another action. No upload is needed.'
+        : 'Recovery data changed. Download and save an updated backup, then confirm it in Backup status before preparing another action. No upload is needed.'
+}
+
 // Session-only coordination. A download request is NOT a saved-file receipt.
 export class AutoBackup {
     revision = 0
@@ -36,9 +45,14 @@ export class AutoBackup {
     enable(password: string): void {
         if (password.length < 24) throw new Error('Use a unique backup passphrase of at least 24 characters')
         this.password = password
+        this.epoch++
         this.attemptedRevision = -1
-        // Always test automatic mode with a new download, even after restore.
-        this.changed()
+        this.offeredRevision = -1
+        // Settings are not recovery mutations. A restored/confirmed checkpoint
+        // remains valid; only an actual wallet change queues a required backup.
+        this.status = this.dirty
+            ? 'Automatic backups enabled — changed recovery data is queued for backup.'
+            : 'Automatic backups enabled. Your restored or confirmed backup remains valid; no new download is needed until recovery data changes. Keep its original passphrase; the session passphrase is used for future exports.'
     }
     disable(): void {
         this.password = ''
@@ -74,9 +88,13 @@ export class AutoBackup {
             if (epoch !== this.epoch || revision !== this.revision) return
             offer(file, revision)
             this.offeredRevision = revision
-            this.status = 'Download requested — check Downloads and confirm the file is saved. Browser prompts or blocking may apply.'
+            this.status = this.dirty
+                ? 'Download requested — check Downloads and confirm the file is saved. Browser prompts or blocking may apply.'
+                : 'Additional backup copy requested. Your restored or confirmed backup remains valid. Check Downloads for this optional copy; browser prompts or blocking may apply.'
         } catch {
-            if (epoch === this.epoch && revision === this.revision) this.status = 'Backup failed. Keep this tab open; retry a manual download. No saved backup has been confirmed.'
+            if (epoch === this.epoch && revision === this.revision) this.status = this.dirty
+                ? 'Backup failed. Keep this tab open; retry a manual download. No saved backup for the changed recovery data has been confirmed.'
+                : 'Additional backup copy failed. Your restored or confirmed backup remains valid; retry the optional download if needed.'
             throw new Error('Encrypted backup could not be prepared or downloaded. Keep this wallet tab open.')
         } finally { this.busy = false }
     }

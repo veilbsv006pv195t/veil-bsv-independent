@@ -115,6 +115,9 @@ button.demo-label:disabled { cursor: wait; opacity: .75; }
 .height-field input { flex: 1; min-width: 0; border: 0; outline: 0; padding: 13px 0; background: transparent; font-size: 15px; font-weight: 650; }
 .height-field span { color: #8b938e; font-size: 9px; white-space: nowrap; }
 .height-status, .height-help { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 8px 0; }
+.backup-preparation-notice { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 12px 0; background: var(--paper); color: var(--ink); }
+.backup-preparation-notice[hidden] { display: none; }
+.backup-preparation-notice p { margin: 0 0 10px; font-size: 13px; line-height: 1.5; }
 .height-status button { color: var(--green); background: transparent; border: 0; text-decoration: underline; cursor: pointer; }
 .height-dots { display: inline-flex; gap: 4px; }
 .height-dots i { font-style: normal; animation: height-pulse 1.2s infinite; }
