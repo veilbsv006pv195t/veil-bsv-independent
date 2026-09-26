@@ -105,6 +105,37 @@ restoring its latest backup before initial guided setup. A pending accepted chai
 can be restored once mined; a partially broadcast chain still requires the
 original open tab. Keep both the newest backup and its passphrase.
 
+### Compact backups, timings and resizable dialogs
+
+New wallet downloads use `.veil`: a versioned binary container holding a salt,
+IV and AES-GCM ciphertext/tag. The payload is deduplicated (guided pairs), gzip
+compressed **before encryption**, and never written as plaintext. PBKDF2-SHA256
+still uses 600,000 iterations. This build accepts both old v2 hex JSON backups
+and new v3 backups; older builds cannot read v3. Keep old backups until a new
+backup has been restored successfully. Exports authenticate and decompress the
+exact offered container before marking the backup saved. File imports remain
+below 64 MB and decompression is bounded to 64 MB; guided expansion validation
+still applies. This is not unlimited storage. Pending encrypted handoffs are
+necessarily larger than fully synchronized backups. Payment and public-pool
+exports retain their existing JSON format for interoperability.
+
+The local stopwatch panel records each operation and its stages: proof artifact
+loading, proof generation, transaction construction, user review, each submission,
+mining/handoff waits, wallet creation/unlock/restore, all backup and file export/
+import operations, and fee-funding checks. Timers continue during retry waits;
+they do not retry transactions. The overall timer starts on the first operation
+and can be restarted/stopped independently. Download timing ends when the browser
+is offered the download, not when a user finishes saving. Export the timing JSON
+before reloading: timings are tab-local, contain no keys or transaction details,
+and are not sent to a service. Restored pending operations are timed only from
+restoration onward. Synchronous work or background throttling can delay display
+refresh, but elapsed duration is measured from the clock, not timer ticks.
+
+Desktop dialogs support corner dragging and Expand/Restore; size changes do not
+re-render input fields or restart work. Phone-sized layouts use the full viewport.
+Background clicks never dismiss a wallet or transaction review. During submission
+the status reports submission in progress, rather than claiming nothing was sent.
+
 The recipient can receive without fee funding, but needs a separate mined
 testnet fee-funding output before spending or withdrawing. Guided mode never
 automatically transfers funding. Restored pool-less wallets must revalidate their

@@ -847,12 +847,13 @@ export class LiveVeilSession {
 
         // Validate canonical recipient bytes before doing expensive proof work.
         const transition = transitionFrom(built)
-        progress(null, 'Generating Groth16 proof…')
+        progress(null, 'Loading Groth16 proof artifacts…')
         const [wasm, zkey] = await Promise.all(['shielded_pool.wasm', 'shielded_pool_final.zkey'].map(async name => {
             const response = await fetch(asset(`recipient/${name}`))
             if (!response.ok) throw new Error(`Required recipient proof artifact is unavailable: ${name}`)
             return new Uint8Array(await response.arrayBuffer())
         }))
+        progress(null, 'Generating Groth16 proof…')
         const { proof } = await groth16.fullProve(
             built.circuitInput,
             wasm,

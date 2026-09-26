@@ -6,6 +6,7 @@ import { LiveVeilSession, PreparedLiveAction } from '../ui/src/live-builder'
 import { createReceivingWallet, LiveWallet } from '../ui/src/live-wallet'
 import { encryptBackup, decryptBackup } from '../src/walletBackup'
 import { GuidedDemo } from '../ui/src/guided-demo'
+import { encodeBackupFile, decodeBackupFile } from '../src/backupFile'
 
 // Integration rehearsal: real proofs, signatures and Script execution; zero
 // network access. MINED responses below are explicitly synthetic fixtures.
@@ -56,7 +57,8 @@ async function main() {
     guided.accepted(send)
     // Recover both keys AND the unprocessed encrypted handoff from one backup.
     const pairBackup = await encryptBackup(guided.backupPayload(), 'synthetic combined backup phrase 12345')
-    guided = await GuidedDemo.restore(await decryptBackup(pairBackup, 'synthetic combined backup phrase 12345'), progress)
+    console.log('BACKUP SIZE pending handoff:', encodeBackupFile(pairBackup).length, 'bytes; legacy hex estimate:', JSON.stringify(guided.backupPayload()).length * 2, 'bytes')
+    guided = await GuidedDemo.restore(await decryptBackup(decodeBackupFile(encodeBackupFile(pairBackup)), 'synthetic combined backup phrase 12345'), progress)
     assert.equal(guided.defaultRecipient(), bobAddress)
     assert.equal(guided.slots.recipient.session, null)
     assert.ok(guided.pending)
@@ -93,7 +95,8 @@ async function main() {
     assert.equal(reverseRestored.slots.sender.session!.privateBalance(), 81_000)
     assert.equal(await guided.poll(progress), true)
     const synchronizedBackup = await encryptBackup(guided.backupPayload(), 'synthetic combined backup phrase 12345')
-    await GuidedDemo.restore(await decryptBackup(synchronizedBackup, 'synthetic combined backup phrase 12345'), progress)
+    console.log('BACKUP SIZE synchronized:', encodeBackupFile(synchronizedBackup).length, 'bytes; legacy hex estimate:', JSON.stringify(guided.backupPayload()).length * 2, 'bytes')
+    await GuidedDemo.restore(await decryptBackup(decodeBackupFile(encodeBackupFile(synchronizedBackup)), 'synthetic combined backup phrase 12345'), progress)
     console.log('PASS: reverse Send and both pending/synchronized combined backups')
     const withdrawal = await restored.prepare('withdraw', 19_000, bobWallet.address, 0, progress)
     assert.equal(withdrawal.newPrivateBalance, 0)

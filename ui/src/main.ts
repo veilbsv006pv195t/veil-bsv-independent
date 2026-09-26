@@ -1,7 +1,7 @@
 import './styles.css'
 import { proveAction } from './prover'
 import type { LiveVeilSession, PreparedLiveAction } from './live-builder'
-import { broadcastRawTransaction, explorerUrl, testnetHeight } from './live-network'
+import { broadcastRawTransaction, explorerUrl, testnetHeight, transactionStatus } from './live-network'
 import { unlockLiveWallet, createReceivingWallet, validateReceivingWallet, type LiveWallet } from './live-wallet'
 import { createHash } from '../../src/crypto'
 import { recipientIdentity, RECIPIENT_PROTOCOL, type EncryptedPayment } from '../../src/recipient'
@@ -9,6 +9,47 @@ import { encryptBackup, decryptBackup, type WalletBackup } from '../../src/walle
 import { GuidedDemo, GUIDED_FORMAT, GUIDED_MARKER, otherRole, type Role } from './guided-demo'
 import { fetchUsdQuote, mainnetUsd, isFresh, type UsdQuote } from './usd-price'
 import { canUnlockOriginalWallet, canCreateGuidedRecipient } from './wallet-entry-guard'
+import { Stopwatches, elapsed } from './stopwatches'
+import { MAX_BACKUP_FILE_BYTES } from '../../src/backupCompression'
+import { encodeBackupFile, decodeBackupFile } from '../../src/backupFile'
+
+const timers = new Stopwatches()
+let foregroundTiming: number | null = null
+let actionTiming: number | null = null
+const miningTimings = new Map<string, number>()
+let miningCheckBusy = false
+let modalExpanded = false
+let modalSize = { width: '', height: '' }
+
+function timingStrip(): string {
+    const snapshot = timers.snapshot()
+    const active = snapshot.operations.filter(r => r.outcome === 'In progress')
+    const last = active.at(-1) ?? snapshot.operations.at(-1)
+    return `<strong>Overall ${elapsed(snapshot.overallMs)}${snapshot.running ? '' : ' · stopped'}</strong>${(active.length ? active : last ? [last] : []).map(r => `<span>${escapeHtml(r.label)} ${elapsed(r.elapsedMs)} · ${r.outcome === 'In progress' ? `${escapeHtml(r.phases.at(-1)!.label)} ${elapsed(r.phases.at(-1)!.elapsedMs)}` : escapeHtml(r.outcome)}</span>`).join('')}${last ? '' : '<span>Starts with the first operation</span>'}`
+}
+function updateTimers(): void {
+    document.querySelectorAll('[data-timing-strip]').forEach(node => { node.innerHTML = timingStrip() })
+    const details = document.querySelector('#timing-records')
+    if (details) details.innerHTML = timers.snapshot().operations.map(r => `<li><strong>${escapeHtml(r.label)} · ${elapsed(r.elapsedMs)} · ${escapeHtml(r.outcome)}</strong><ul>${r.phases.map(p => `<li>${escapeHtml(p.label)}: ${(p.elapsedMs / 1000).toFixed(1)}s</li>`).join('')}</ul></li>`).join('')
+}
+function modalToolbar(): string {
+    return `<div class="modal-toolbar"><button class="secondary-button" id="expand-modal" aria-pressed="${modalExpanded}">${modalExpanded ? 'Restore size' : 'Expand'}</button><div data-timing-strip class="timing-strip">${timingStrip()}</div></div>`
+}
+async function checkMiningTimings(): Promise<void> {
+    if (miningCheckBusy || !miningTimings.size) return
+    miningCheckBusy = true
+    try {
+        for (const [txid, id] of miningTimings) {
+            // Guided actions finish after both mining and handoff, not mining alone.
+            if (state.guided?.pending?.txid === txid) continue
+            try {
+                const status = await transactionStatus(txid)
+                if (status?.txStatus === 'MINED') { timers.finish(id, 'ARC reports mined'); miningTimings.delete(txid) }
+                else if (status && /REJECT|CONFLICT|DOUBLE_SPEND/.test(status.txStatus)) { timers.finish(id, `ARC ${status.txStatus}`); miningTimings.delete(txid) }
+            } catch { /* Keep elapsed wait running. This check never resubmits. */ }
+        }
+    } finally { miningCheckBusy = false; updateTimers() }
+}
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
 type Theme = 'light' | 'dark'
@@ -150,6 +191,8 @@ function shortProof(signal: string): string {
 }
 
 function render(): void {
+    const oldModal = document.querySelector<HTMLElement>('.live-modal')
+    if (oldModal && !modalExpanded) modalSize = { width: oldModal.style.width, height: oldModal.style.height }
     const active = copy[state.action]
     const max = state.action === 'shield' ? state.publicBalance : state.privateBalance
     const live = state.liveSession !== null
@@ -182,6 +225,11 @@ function render(): void {
         </header>
 
         <main>
+          <aside class="timing-panel" aria-label="Operation stopwatches">
+            <div data-timing-strip class="timing-strip">${timingStrip()}</div>
+            <div class="timing-controls"><button id="restart-overall">Start/restart overall</button><button id="stop-overall">Stop overall</button><button id="save-timings">Export timings</button></div>
+            <details><summary>All operation and stage timings</summary><p>Local to this tab; wall-clock elapsed time includes review and network waits. Download timers end when offered, not when saved to disk. A blocked browser may delay display updates. Export before reloading.</p><ol id="timing-records"></ol></details>
+          </aside>
           <aside class="version-notice" aria-label="Version information">
             <strong>v0.3.0 · Two-wallet testnet candidate</strong>
             <span>New protocol; do not import old pool notes. No contract is deployed merely by opening this page.</span>
@@ -305,6 +353,12 @@ function render(): void {
       ${state.liveDialogOpen || state.pendingLivePlan ? liveDialog() : ''}
     `
     wireEvents()
+    const modal = document.querySelector<HTMLElement>('.live-modal')
+    if (modal) {
+        modal.classList.toggle('expanded', modalExpanded)
+        if (!modalExpanded) { modal.style.width = modalSize.width; modal.style.height = modalSize.height }
+    }
+    updateTimers()
 }
 
 function liveDialog(): string {
@@ -313,8 +367,9 @@ function liveDialog(): string {
         const submissionStarted = state.liveBroadcastIndex >= 0
         return `<div class="modal-backdrop" id="live-modal-backdrop">
           <section class="live-modal review-modal" role="dialog" aria-modal="true" aria-labelledby="live-title">
+            ${modalToolbar()}
             <button class="modal-close" id="close-live-modal" aria-label="Close" ${state.busy || submissionStarted ? 'disabled' : ''}>×</button>
-            <span class="live-kicker">SIGNED LOCALLY · NOT BROADCAST</span>
+            <span class="live-kicker">${submissionStarted ? state.busy ? 'SUBMITTING · MINING NOT YET CONFIRMED' : 'SUBMISSION INTERRUPTED · KEEP THIS CHAIN OPEN' : 'SIGNED LOCALLY · NOT BROADCAST'}</span>
             <h2 id="live-title">Review the exact testnet chain</h2>
             <div class="review-summary">
               <div><span>Action</span><strong>${escapeHtml(plan.action)}</strong></div>
@@ -330,18 +385,21 @@ function liveDialog(): string {
                 <a href="${explorerUrl(tx.txid)}" target="_blank" rel="noopener noreferrer" aria-label="View transaction ${tx.txid} on Whatsonchain testnet in a new tab">${tx.txid.slice(0, 12)}…${tx.txid.slice(-10)}</a>
               </li>`).join('')}
             </ol>
-            <p class="review-warning">${escapeHtml(plan.warning)}</p>
+            <div class="review-footer">
+            <p class="review-warning">${submissionStarted ? 'Submission has started. Some transactions may already be accepted. Keep this page open; retry only this exact chain if needed.' : escapeHtml(plan.warning)}</p>
             <label class="live-confirm"><input id="live-confirm" type="checkbox" ${state.liveConfirm ? 'checked' : ''} ${state.busy ? 'disabled' : ''}/><span>I checked the action, amount, recipient, fees, and TXIDs. Broadcast this exact parent-first chain on BSV testnet.</span></label>
             <button class="primary-button danger-button" id="broadcast-live-plan" ${!state.liveConfirm || state.busy ? 'disabled' : ''}>
               ${state.busy ? '<span class="spinner"></span> Broadcasting exact chain…' : 'Broadcast exact testnet chain →'}
             </button>
+            </div>
             ${state.liveError ? `<p class="live-error" role="alert">${escapeHtml(state.liveError)}${submissionStarted ? ' Keep this page open and retry the same chain; accepted ancestors will not be resent.' : ''}</p>` : ''}
           </section>
         </div>`
     }
     return `<div class="modal-backdrop" id="live-modal-backdrop">
       <section class="live-modal" role="dialog" aria-modal="true" aria-labelledby="live-title">
-        <button class="modal-close" id="close-live-modal" aria-label="Close">×</button>
+        ${modalToolbar()}
+        <button class="modal-close" id="close-live-modal" aria-label="Close" ${state.busy || state.liveUnlocking ? 'disabled' : ''}>×</button>
         <span class="live-kicker">DISPOSABLE WALLET · TESTNET ONLY</span>
         <h2 id="live-title">${state.liveSession ? 'Live wallet · receive and back up' : state.receivingWallet ? 'Independent wallet ready' : 'Restore or set up a testnet wallet'}</h2>
         ${state.liveSession || state.receivingWallet ? `
@@ -355,6 +413,7 @@ function liveDialog(): string {
           <button class="secondary-button" id="copy-receiving-address">Copy this wallet’s receiving address</button>
           <p>To receive here, give this address to another wallet. To send from here, enter the OTHER wallet’s receiving address—not this one. Never share your backup.</p>
           <p>${state.guided ? 'Save both wallets together. Close this dialog to allow mining checks and automatic synchronization. A mined snapshot is not an unspent-output guarantee; never transact from another tab using these wallets.' : state.liveSession ? 'Import each other wallet’s pool update before the next action. Updates must be direct successors. A mined snapshot is not an unspent-output guarantee; do not transact concurrently.' : state.fundingChecked ? 'Funded wallet ready. Save its encrypted backup, then prepare a fresh pool. Preparation does not broadcast; the exact transactions require a separate review.' : 'Independent receiver ready. Save its encrypted backup before sharing the address. Import a mined payment file, then bind your own testnet funding output for miner fees.'}</p>
+          <p>New .veil backups are compressed before encryption and stored as compact binary files. Older .json backups can still be restored here; older website builds cannot read the new format. Keep your previous backup until recovery is verified.</p>
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
           <button class="secondary-button" id="save-wallet-backup">Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}</button>
@@ -385,7 +444,7 @@ function liveDialog(): string {
           <div class="text-field"><input id="restore-password" type="password" autocomplete="current-password" /></div>
           <label class="live-confirm"><input id="guided-demo-choice" type="checkbox" ${state.guidedRequested ? 'checked' : ''} /> Guided demo: create a separate recipient on first setup</label>
           <label class="field-label" for="restore-backup">Restore encrypted wallet backup</label>
-          <input id="restore-backup" type="file" accept=".json,application/json" />
+          <input id="restore-backup" type="file" accept=".veil,.json,application/json,application/octet-stream" />
           <h3 class="setup-divider">First-time setup only</h3>
           <p>The separately delivered live-wallet password opens the original funding wallet, not your saved private notes. If you have used it already, restore above instead. Wallet data is decrypted locally; passwords are never sent to GitHub, Veil, ARC, or WhatsOnChain.</p>
           <label class="field-label" for="live-password">First-time live-wallet password</label>
@@ -497,6 +556,8 @@ async function checkGuidedHandoff(): Promise<void> {
         const changed = await pair.poll(updateProofProgress)
         if (state.guided !== pair) return
         if (changed) {
+            const timing = miningTimings.get(pending.txid)
+            if (timing !== undefined) { timers.finish(timing, 'ARC reports mined; wallets synchronized'); miningTimings.delete(pending.txid) }
             state.backupDirty = true
             if (pending.payment) state.guidedViews[peerRole].activities.unshift({
                 kind: 'send', received: true, title: 'Received privately on testnet',
@@ -541,6 +602,8 @@ function showToast(message: string): void {
 }
 
 function updateProofProgress(percent: number | null, label: string): void {
+    timers.phase(foregroundTiming, label)
+    updateTimers()
     state.proofProgress = percent === null ? null : Math.max(1, Math.min(100, Math.round(percent)))
     state.proofProgressLabel = label
     const progress = document.querySelector<HTMLDivElement>('.proof-progress')
@@ -588,6 +651,8 @@ async function connectWallet(): Promise<void> {
 
 async function unlockBrowserWallet(): Promise<void> {
     if (!walletUnlockAllowed()) return
+    const timing = timers.start('First-time wallet unlock', 'Decrypt wallet and check funding')
+    foregroundTiming = timing
     const input = document.querySelector<HTMLInputElement>('#live-password')
     let password = input?.value ?? ''
     if (input) input.value = ''
@@ -611,10 +676,13 @@ async function unlockBrowserWallet(): Promise<void> {
         state.currentHeight = height
         state.activities = []
         if (state.guidedRequested) await enableGuided()
+        timers.finish(timing, 'Completed')
     } catch (error) {
+        timers.finish(timing, 'Failed')
         password = ''
         state.liveError = error instanceof Error ? error.message : 'Could not unlock the live wallet'
     } finally {
+        foregroundTiming = null
         state.liveUnlocking = false
         state.proofProgress = 0
         state.proofProgressLabel = ''
@@ -654,17 +722,20 @@ function downloadJson(value: unknown, name: string): void {
     setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 async function readJsonFile(file: File | undefined): Promise<any> {
-    if (!file || file.size > 64_000_000) throw new Error('Select a JSON file smaller than 64 MB')
+    if (!file || file.size >= MAX_BACKUP_FILE_BYTES) throw new Error('Select a JSON file smaller than 64 MB')
     return JSON.parse(await file.text())
 }
-async function walletTask(task: () => Promise<void>): Promise<void> {
+async function walletTask(task: () => Promise<void>, label = 'Wallet operation'): Promise<void> {
     if (state.busy || state.liveUnlocking || state.pendingLivePlan || state.guidedPolling) return
     state.busy = true
     state.liveError = ''
     render()
-    try { await task() }
-    catch (error) { state.liveError = error instanceof Error ? error.message : 'Wallet operation failed' }
-    finally { syncGuidedSlot(); state.busy = false; state.liveDialogOpen = true; render() }
+    const timing = timers.start(label)
+    foregroundTiming = timing
+    updateTimers()
+    try { await task(); timers.finish(timing, label.includes('export') || label.includes('backup download') ? 'Download offered' : 'Completed') }
+    catch (error) { timers.finish(timing, 'Failed'); state.liveError = error instanceof Error ? error.message : 'Wallet operation failed' }
+    finally { foregroundTiming = null; syncGuidedSlot(); state.busy = false; state.liveDialogOpen = true; render() }
 }
 async function adoptSession(session: LiveVeilSession): Promise<void> {
     const height = await testnetHeight()
@@ -681,19 +752,31 @@ async function adoptSession(session: LiveVeilSession): Promise<void> {
     state.activities = []
 }
 async function saveBackup(password: string): Promise<void> {
+    timers.phase(foregroundTiming, 'Serialize, deduplicate, compress and encrypt')
     syncGuidedSlot()
     const payload = state.guided?.backupPayload() ?? state.liveSession?.backupPayload() ?? {
         protocol: RECIPIENT_PROTOCOL, wallet: state.receivingWallet, pool: null, notes: [],
     }
     const encrypted = await encryptBackup(payload, password)
+    timers.phase(foregroundTiming, 'Authenticate and decompress backup for verification')
     // Test authentication before offering the file. The user still needs to
     // retain both the downloaded file and passphrase outside this browser.
-    await decryptBackup(encrypted, password)
-    downloadJson(encrypted, state.guided ? 'veil-encrypted-two-wallet-backup.json' : 'veil-encrypted-wallet-backup.json')
+    const file = encodeBackupFile(encrypted)
+    // Verify the exact binary container offered for download, not only its envelope.
+    await decryptBackup(decodeBackupFile(file), password)
+    const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = state.guided ? 'veil-encrypted-two-wallet-backup.veil' : 'veil-encrypted-wallet-backup.veil'
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
     state.backupDirty = false
+    showToast(`Compact encrypted backup offered: ${(file.length / 1_000_000).toFixed(2)} MB`)
 }
 async function restoreWallet(envelope: WalletBackup, password: string): Promise<void> {
+    timers.phase(foregroundTiming, 'Authenticate, decompress and decode backup')
     const payload = await decryptBackup(envelope, password) as any
+    timers.phase(foregroundTiming, 'Validate wallet and check mined pool')
     if (payload?.format === GUIDED_FORMAT) {
         const pair = await GuidedDemo.restore(payload, updateProofProgress)
         state.guided = pair
@@ -706,6 +789,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         displayGuidedRole()
         state.recipient = pair.defaultRecipient()
         state.guidedMessage = pair.pending ? 'Restored both wallets and pending handoff. Checking mining automatically.' : 'Restored both wallets from the encrypted backup; no replacement keys generated.'
+        if (pair.pending) miningTimings.set(pair.pending.txid, timers.start('Restored pending handoff', 'Mining/handoff wait since restore; earlier duration unknown'))
         state.backupDirty = false
         return
     }
@@ -742,6 +826,8 @@ window.addEventListener('beforeunload', event => {
 async function prepareLiveAction(amount: number, unlockHeight: number): Promise<boolean> {
     const session = state.liveSession
     if (!session) return false
+    actionTiming = timers.start(`${state.action === 'shield' ? 'Add' : state.action} · live testnet`, 'Prepare')
+    foregroundTiming = actionTiming
     state.busy = true
     state.liveError = ''
     state.proofProgress = 1
@@ -758,6 +844,8 @@ async function prepareLiveAction(amount: number, unlockHeight: number): Promise<
             updateProofProgress
         )
         state.pendingLivePlan = plan
+        timers.phase(actionTiming, 'User review — not broadcast')
+        foregroundTiming = null
         state.liveConfirm = false
         state.liveDialogOpen = false
         state.currentHeight = plan.startHeight
@@ -767,6 +855,8 @@ async function prepareLiveAction(amount: number, unlockHeight: number): Promise<
         render()
         return true
     } catch (error) {
+        timers.finish(actionTiming, 'Preparation failed')
+        foregroundTiming = null
         state.busy = false
         state.proofProgress = 0
         state.proofProgressLabel = ''
@@ -781,12 +871,14 @@ async function broadcastLivePlan(): Promise<void> {
     const plan = state.pendingLivePlan
     const session = state.liveSession
     if (!plan || !session || !state.liveConfirm || state.busy) return
+    timers.phase(actionTiming, 'Broadcasting exact chain')
     state.busy = true
     state.liveError = ''
     render()
     try {
         for (let index = 0; index < plan.transactions.length; index++) {
             state.liveBroadcastIndex = index
+            timers.phase(actionTiming, `Submit ${index + 1}/${plan.transactions.length}: ${plan.transactions[index].name}`)
             render()
             const transaction = plan.transactions[index]
             await broadcastRawTransaction(transaction.rawHex, transaction.txid)
@@ -802,6 +894,10 @@ async function broadcastLivePlan(): Promise<void> {
         state.publicBalance = session.fundingBalance()
         state.backupDirty = true
         const finalTx = plan.transactions.at(-1)!
+        if (actionTiming !== null) {
+            timers.phase(actionTiming, state.guided ? 'Waiting for mining and automatic handoff' : 'Waiting for mining')
+            miningTimings.set(finalTx.txid, actionTiming)
+        }
         state.activities.unshift({
             kind: plan.action,
             title:
@@ -829,6 +925,7 @@ async function broadcastLivePlan(): Promise<void> {
         render()
         showToast(state.guided ? 'ARC accepted. Save the combined backup, then close this dialog to check mining and synchronize both wallets.' : plan.action === 'send' ? 'ARC accepted. Save your backup and encrypted payment file; recipient imports after mining.' : 'ARC accepted. Save an updated encrypted backup and share the pool update with the other wallet.')
     } catch (error) {
+        timers.phase(actionTiming, 'Submission interrupted — waiting for exact-chain retry')
         state.busy = false
         state.liveError = error instanceof Error ? error.message : 'ARC did not accept the transaction chain'
         render()
@@ -873,6 +970,8 @@ async function submit(): Promise<boolean> {
 
     if (state.liveSession) return prepareLiveAction(amount, unlockHeight)
 
+    const localTiming = timers.start(`${state.action === 'shield' ? 'Add' : state.action} · local proof`, 'Preparing private proof')
+    foregroundTiming = localTiming
     state.busy = true
     state.proofProgress = 1
     state.proofProgressLabel = 'Preparing private proof'
@@ -889,6 +988,8 @@ async function submit(): Promise<boolean> {
             updateProofProgress
         )
     } catch (error) {
+        timers.finish(localTiming, 'Failed')
+        foregroundTiming = null
         state.busy = false
         state.proofProgress = 0
         state.proofProgressLabel = ''
@@ -897,6 +998,8 @@ async function submit(): Promise<boolean> {
         return false
     }
 
+    timers.finish(localTiming, 'Proof verified locally — not broadcast')
+    foregroundTiming = null
     if (state.action === 'shield') {
         state.publicBalance -= amount
         state.privateBalance += amount
@@ -1000,13 +1103,30 @@ async function runDemo(): Promise<void> {
 }
 
 function wireEvents(): void {
+    document.querySelector('#restart-overall')?.addEventListener('click', () => { timers.resetOverall(); updateTimers() })
+    document.querySelector('#stop-overall')?.addEventListener('click', () => { timers.stopOverall(); updateTimers() })
+    document.querySelector('#save-timings')?.addEventListener('click', () => {
+        const id = timers.start('Timing report export')
+        timers.finish(id, 'Download offered')
+        downloadJson(timers.snapshot(), 'veil-timings.json'); updateTimers()
+    })
+    document.querySelector('#expand-modal')?.addEventListener('click', () => {
+        const modal = document.querySelector<HTMLElement>('.live-modal')!
+        if (!modalExpanded) modalSize = { width: modal.style.width, height: modal.style.height }
+        modalExpanded = !modalExpanded
+        modal.classList.toggle('expanded', modalExpanded)
+        const button = document.querySelector<HTMLButtonElement>('#expand-modal')!
+        button.textContent = modalExpanded ? 'Restore size' : 'Expand'
+        button.setAttribute('aria-pressed', String(modalExpanded))
+        // No render: preserve passwords, file selections, scroll and pending review.
+    })
     document.querySelector('#refresh-usd')?.addEventListener('click', () => void refreshUsd())
     document.querySelector<HTMLInputElement>('#guided-demo-choice')?.addEventListener('change', event => {
         state.guidedRequested = (event.target as HTMLInputElement).checked
     })
     document.querySelector('#enable-guided-demo')?.addEventListener('click', () => {
         const confirmed = document.querySelector<HTMLInputElement>('#confirm-new-recipient')?.checked === true
-        void walletTask(() => enableGuided(confirmed))
+        void walletTask(() => enableGuided(confirmed), 'Create guided recipient')
     })
     document.querySelectorAll<HTMLButtonElement>('[data-wallet-role]').forEach(button => button.addEventListener('click', () => selectGuidedRole(button.dataset.walletRole as Role)))
     document.querySelector('#check-guided-handoff')?.addEventListener('click', () => void checkGuidedHandoff())
@@ -1025,7 +1145,7 @@ function wireEvents(): void {
         state.backupDirty = true
         state.fundingChecked = false
         state.connected = true
-    }))
+    }, 'Create independent receiving wallet'))
     document.querySelector('#copy-receiving-address')?.addEventListener('click', () => {
         if (state.backupDirty && !state.liveSession) { showToast('Save the encrypted receiver backup before sharing this address'); return }
         void navigator.clipboard?.writeText(state.receivingAddress)
@@ -1034,14 +1154,17 @@ function wireEvents(): void {
         const input = document.querySelector<HTMLInputElement>('#backup-password')!
         const password = input.value
         input.value = ''
-        void walletTask(() => saveBackup(password))
+        void walletTask(() => saveBackup(password), state.guided ? 'Two-wallet backup download' : 'Single-wallet backup download')
     })
     document.querySelector<HTMLInputElement>('#restore-backup')?.addEventListener('change', event => {
         const file = (event.target as HTMLInputElement).files?.[0]
         const input = document.querySelector<HTMLInputElement>('#restore-password')!
         const password = input.value
         input.value = ''
-        void walletTask(async () => restoreWallet(await readJsonFile(file), password))
+        void walletTask(async () => {
+            if (!file || file.size >= MAX_BACKUP_FILE_BYTES) throw new Error('Choose a .veil or legacy .json backup smaller than 64 MB')
+            await restoreWallet(decodeBackupFile(new Uint8Array(await file.arrayBuffer())), password)
+        }, 'Restore encrypted wallet backup')
     })
     document.querySelector<HTMLInputElement>('#payment-file')?.addEventListener('change', event => {
         const file = (event.target as HTMLInputElement).files?.[0]
@@ -1055,22 +1178,22 @@ function wireEvents(): void {
                 const { LiveVeilSession } = await import('./live-builder')
                 await adoptSession(await LiveVeilSession.receive(state.receivingWallet, payment, updateProofProgress))
             }
-        })
+        }, 'Import encrypted payment')
     })
     document.querySelector('#save-payment-file')?.addEventListener('click', () => {
         const payment = state.liveSession?.paymentFile()
-        if (payment) downloadJson(payment, 'veil-encrypted-payment.json')
+        if (payment) void walletTask(async () => { downloadJson(payment, 'veil-encrypted-payment.json') }, 'Encrypted payment export')
     })
     document.querySelector('#save-pool-state')?.addEventListener('click', () => void walletTask(async () => {
         downloadJson(state.liveSession!.poolSnapshot(), 'veil-public-pool-update.json')
-    }))
+    }, 'Public pool update export'))
     document.querySelector<HTMLInputElement>('#pool-file')?.addEventListener('change', event => {
         const file = (event.target as HTMLInputElement).files?.[0]
         void walletTask(async () => {
             if (state.guided) throw new Error('Guided mode synchronizes pool state automatically after mining')
             await state.liveSession!.importPoolSnapshot(await readJsonFile(file))
             await adoptSession(state.liveSession!)
-        })
+        }, 'Import public pool update')
     })
     document.querySelector('#bind-funding')?.addEventListener('click', () => {
         const raw = document.querySelector<HTMLTextAreaElement>('#funding-hex')!.value.trim()
@@ -1087,14 +1210,14 @@ function wireEvents(): void {
                 state.fundingChecked = true
             }
             state.backupDirty = true
-        })
+        }, 'Check and bind fee funding')
     })
     document.querySelector('#start-new-pool')?.addEventListener('click', () => void walletTask(async () => {
         if (state.guided && (state.guided.active !== 'sender' || state.backupDirty)) throw new Error('Save the combined backup first; only the sender prepares a fresh pool')
         if (!state.fundingChecked || !state.receivingWallet) throw new Error('Bind mined funding first')
         const { LiveVeilSession } = await import('./live-builder')
         await adoptSession(await LiveVeilSession.create(state.receivingWallet, updateProofProgress))
-    }))
+    }, 'Prepare fresh pool'))
     document.querySelectorAll<HTMLButtonElement>('[data-run-demo]').forEach((button) => {
         button.addEventListener('click', runDemo)
     })
@@ -1180,7 +1303,8 @@ function wireEvents(): void {
         void broadcastLivePlan()
     })
     document.querySelector('#close-live-modal')?.addEventListener('click', () => {
-        if (state.busy || state.liveBroadcastIndex >= 0) return
+        if (state.busy || state.liveUnlocking || state.liveBroadcastIndex >= 0) return
+        if (state.pendingLivePlan) timers.finish(actionTiming, 'Review dismissed — not broadcast')
         state.liveDialogOpen = false
         state.pendingLivePlan = null
         state.liveConfirm = false
@@ -1189,13 +1313,8 @@ function wireEvents(): void {
         render()
     })
     document.querySelector('#live-modal-backdrop')?.addEventListener('click', (event) => {
-        if (event.target !== event.currentTarget || state.busy || state.liveBroadcastIndex >= 0) return
-        state.liveDialogOpen = false
-        state.pendingLivePlan = null
-        state.liveConfirm = false
-        state.liveError = ''
-        state.liveBroadcastIndex = -1
-        render()
+        // Deliberate close only; background clicks never discard work or inputs.
+        if (event.target === event.currentTarget) event.preventDefault()
     })
 }
 
@@ -1204,3 +1323,5 @@ render()
 void refreshUsd()
 window.setInterval(() => { updateUsdDisplay(); void refreshUsd() }, 5 * 60_000)
 window.setInterval(() => void checkGuidedHandoff(), 30_000)
+window.setInterval(updateTimers, 250)
+window.setInterval(() => void checkMiningTimings(), 30_000)
