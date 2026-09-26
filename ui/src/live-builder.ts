@@ -25,6 +25,7 @@ import { RECIPIENT_PROTOCOL, EncryptedPayment, encryptPayment, decryptPayment, p
 import { PoolSnapshot, EncodedNote, encodeNote, decodeNote, restorePool, assertMonotonic } from '../../src/recipientState'
 import { LiveWallet, validateReceivingWallet } from './live-wallet'
 import { MinerPolicy, testnetHeight, testnetPolicy, transactionStatus } from './live-network'
+import { resolveLockHeight } from './lock-height'
 
 export type LiveAction = 'shield' | 'send' | 'lock' | 'withdraw'
 
@@ -781,11 +782,14 @@ export class LiveVeilSession {
         action: LiveAction,
         amount: number,
         recipient: string,
-        unlockHeight: number,
-        progress: BuilderProgress
+        unlockHeight: number | string,
+        progress: BuilderProgress,
+        readHeight: () => Promise<number> = testnetHeight
     ): Promise<PreparedLiveAction> {
         if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Enter a positive whole-satoshi amount')
-        const startHeight = await testnetHeight()
+        progress(1, 'Checking current testnet block height')
+        const startHeight = await readHeight()
+        const resolvedUnlockHeight = action === 'lock' ? resolveLockHeight(unlockHeight, startHeight) : 0
         const stagedState = cloneState(this.poolState, this.hash)
         const identity = recipientIdentity(this.wallet.wif, this.hash)
         const ownedKey = identity.owner
@@ -824,7 +828,7 @@ export class LiveVeilSession {
                         : [],
                 })
             } else {
-                const lockHeight = action === 'lock' ? unlockHeight : 0
+                const lockHeight = resolvedUnlockHeight
                 if (action === 'lock' && (!Number.isSafeInteger(lockHeight) || lockHeight <= startHeight)) {
                     throw new Error(`Choose an unlock height above ${startHeight}`)
                 }
@@ -908,7 +912,7 @@ export class LiveVeilSession {
             action,
             amount,
             recipient: action === 'withdraw' ? publicRecipient : action === 'send' ? recipient : undefined,
-            unlockHeight: action === 'lock' ? unlockHeight : undefined,
+            unlockHeight: action === 'lock' ? resolvedUnlockHeight : undefined,
             startHeight,
             oldPrivateBalance,
             newPrivateBalance,

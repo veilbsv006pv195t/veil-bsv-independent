@@ -114,8 +114,14 @@ button.demo-label:disabled { cursor: wait; opacity: .75; }
 .height-field:focus-within { border-color: #5a8f75; box-shadow: 0 0 0 3px rgba(50,115,82,.1); }
 .height-field input { flex: 1; min-width: 0; border: 0; outline: 0; padding: 13px 0; background: transparent; font-size: 15px; font-weight: 650; }
 .height-field span { color: #8b938e; font-size: 9px; white-space: nowrap; }
-.height-shortcuts { display: flex; gap: 7px; margin: 7px 0 16px; }
-.height-shortcuts button { border: 0; border-radius: 7px; padding: 6px 8px; color: var(--green); background: var(--mint); font-size: 9px; font-weight: 800; }
+.height-status, .height-help { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 8px 0; }
+.height-status button { color: var(--green); background: transparent; border: 0; text-decoration: underline; cursor: pointer; }
+.height-dots { display: inline-flex; gap: 4px; }
+.height-dots i { font-style: normal; animation: height-pulse 1.2s infinite; }
+.height-dots i:nth-child(2) { animation-delay: .2s; }
+.height-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes height-pulse { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .height-dots i { animation: none; } }
 .primary-button { width: 100%; border: 0; border-radius: 12px; min-height: 47px; display: flex; align-items: center; justify-content: center; gap: 9px; color: white; background: var(--green); font-size: 13px; font-weight: 750; box-shadow: 0 9px 20px rgba(22,79,57,.18); transition: .15s; }
 .primary-button:hover:not(:disabled) { transform: translateY(-1px); background: #1b6146; }
 .primary-button:disabled { cursor: wait; opacity: .78; }

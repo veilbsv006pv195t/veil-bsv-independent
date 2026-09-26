@@ -45,11 +45,17 @@ export async function testnetPolicy(): Promise<MinerPolicy> {
 }
 
 export async function testnetHeight(): Promise<number> {
-    const value = await json<{ blockHeight?: number }>(`${ARCADE}/health`)
-    if (!Number.isSafeInteger(value.blockHeight) || (value.blockHeight as number) <= 0) {
-        throw new Error('The testnet miner returned an invalid block height')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 45_000)
+    try {
+        const value = await json<{ blockHeight?: number }>(`${ARCADE}/health`, { signal: controller.signal })
+        if (!Number.isSafeInteger(value.blockHeight) || (value.blockHeight as number) <= 0 || (value.blockHeight as number) >= 500_000_000) {
+            throw new Error('The testnet miner returned an invalid block height')
+        }
+        return value.blockHeight as number
+    } finally {
+        clearTimeout(timeout)
     }
-    return value.blockHeight as number
 }
 
 export async function transactionStatus(txid: string): Promise<BroadcastResult | null> {

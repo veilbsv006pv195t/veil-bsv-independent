@@ -113,7 +113,10 @@ async function main() {
     await assert.rejects(alice.importPoolSnapshot(shield.snapshot), /missing intermediate|stale/)
     console.log('PASS: Bob withdrawal pays his address; Alice synchronizes public state')
 
-    const lock = await alice.prepare('lock', 75_000, '', height + 2, progress)
+    await assert.rejects(alice.prepare('lock', 75_000, '', String(height - 1), progress), /above/)
+    const lock = await alice.prepare('lock', 75_000, '', '+2', progress)
+    assert.equal(lock.unlockHeight, height + 2)
+    assert.equal(lock.unlockHeight - lock.startHeight, 2)
     accept(alice, lock)
     guided.active = 'sender'
     guided.accepted(lock)

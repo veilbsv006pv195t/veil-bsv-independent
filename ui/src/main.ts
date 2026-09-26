@@ -13,6 +13,9 @@ import { Stopwatches, elapsed } from './stopwatches'
 import { MAX_BACKUP_FILE_BYTES } from '../../src/backupCompression'
 import { encodeBackupFile, decodeBackupFile } from '../../src/backupFile'
 import { AutoBackup, backupChoice } from './auto-backup'
+import { HeightTracker, resolveLockHeight, lockHeightLabel } from './lock-height'
+
+const heights = new HeightTracker(testnetHeight, updateHeightDisplay)
 
 const backups = new AutoBackup()
 let autoBackupSelected = false
@@ -172,7 +175,6 @@ const state = {
     privateBalance: 1_000,
     lockedBalance: 0,
     publicBalance: 25_400,
-    currentHeight: 910_000,
     connected: false,
     liveSession: null as LiveVeilSession | null,
     liveAddress: '',
@@ -246,6 +248,35 @@ function formatSats(value: number): string {
     return new Intl.NumberFormat('en-GB').format(value)
 }
 
+function heightStatus(): string {
+    if (heights.loading) return 'Current testnet height: <span class="height-dots" role="status" aria-label="Getting current testnet height"><i>●</i><i>●</i><i>●</i></span>'
+    if (heights.height === null) return 'Testnet height unavailable'
+    return `Current testnet height: ${formatSats(heights.height)}`
+}
+
+function updateHeightDisplay(): void {
+    const status = document.querySelector('#height-status')
+    if (status) status.innerHTML = heightStatus()
+    const retry = document.querySelector<HTMLButtonElement>('#retry-height')
+    if (retry) { retry.hidden = heights.height !== null || heights.loading; retry.disabled = state.busy }
+    const preview = document.querySelector('#resolved-height')
+    if (preview) {
+        let text = ''
+        if (state.unlockHeight.trim() && heights.height !== null && !heights.loading) {
+            try { text = `Unlock height: ${lockHeightLabel(resolveLockHeight(state.unlockHeight, heights.height), heights.height)} — checked again when you prepare.` }
+            catch (error) { text = error instanceof Error ? error.message : 'Invalid unlock height' }
+        }
+        preview.textContent = text
+    }
+    const button = document.querySelector<HTMLButtonElement>('#submit-action')
+    if (button && state.action === 'lock') button.disabled = state.busy || state.guidedPolling || !!state.guided?.pending || !!(state.guided && !state.liveSession) || heights.loading || heights.height === null
+    if (heights.height !== null && state.liveSession) {
+        state.lockedBalance = state.liveSession.lockedBalance(heights.height)
+        const locked = document.querySelector('#locked-balance')
+        if (locked) locked.textContent = `${formatSats(state.lockedBalance)} sats`
+    }
+}
+
 function shortProof(signal: string): string {
     return `${signal.slice(0, 6)}…${signal.slice(-6)}`
 }
@@ -291,9 +322,9 @@ function render(): void {
             <details><summary>All operation and stage timings</summary><p>Local to this tab; wall-clock elapsed time includes review and network waits. Download timers end when offered, not when saved to disk. A blocked browser may delay display updates. Export before reloading.</p><ol id="timing-records"></ol></details>
           </aside>
           <aside class="version-notice" aria-label="Version information">
-            <strong>v0.3.1 · Automatic encrypted backup candidate</strong>
-            <span>Compatible with v0.3.0 backups and pools. Restore your latest backup; never operate the same wallet in both versions. Opening this page does not deploy or broadcast.</span>
-            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/v0.3.0/" target="_blank" rel="noopener noreferrer">Open v0.3.0 for comparison ↗</a>
+            <strong>v0.3.2 · Verified testnet lock heights</strong>
+            <span>Compatible with v0.3.0 and v0.3.1 backups and pools. Restore your latest backup; never operate the same wallet in both versions. Opening this page does not deploy or broadcast.</span>
+            <a href="https://veilbsv006pv195t.github.io/veil-bsv-independent/v0.3.1/" target="_blank" rel="noopener noreferrer">Open v0.3.1 for comparison ↗</a>
           </aside>
           ${state.liveSession || state.receivingWallet ? '<aside class="version-notice" data-backup-controls aria-label="Encrypted backup status"></aside>' : ''}
           ${state.guided ? `<aside class="version-notice guided-controls" aria-label="Guided two-wallet demo">
@@ -321,7 +352,7 @@ function render(): void {
 
               <div class="locked-summary ${state.lockedBalance > 0 ? 'has-lock' : ''}">
                 ${icons.lock}
-                <span><small>Height-locked</small><strong>${formatSats(state.lockedBalance)} sats</strong></span>
+                <span><small>Height-locked</small><strong id="locked-balance">${formatSats(state.lockedBalance)} sats</strong></span>
               </div>
 
               <div class="address-card">
@@ -369,13 +400,11 @@ function render(): void {
               ${state.action === 'lock' ? `
                 <label class="field-label" for="unlock-height">Unlock block</label>
                 <div class="height-field">
-                  <input id="unlock-height" inputmode="numeric" placeholder="e.g. ${formatSats(state.currentHeight + 1_000)}" value="${escapeHtml(state.unlockHeight)}" />
-                  <span>Current: ${formatSats(state.currentHeight)}</span>
+                  <input id="unlock-height" type="text" autocomplete="off" spellcheck="false" aria-describedby="height-help resolved-height" placeholder="+3 or 1,760,000" value="${escapeHtml(state.unlockHeight)}" />
                 </div>
-                <div class="height-shortcuts">
-                  <button data-height="100">+100 blocks</button>
-                  <button data-height="1000">+1,000 blocks</button>
-                </div>
+                <p class="height-status"><span id="height-status">${heightStatus()}</span> <button id="retry-height" type="button" ${heights.height !== null || heights.loading ? 'hidden' : ''}>Retry</button></p>
+                <p id="height-help" class="height-help">Use +3 for three more blocks, or enter an absolute block height. Block intervals vary.</p>
+                <p id="resolved-height" class="height-help" role="status"></p>
               ` : ''}
 
               <button class="primary-button" id="submit-action" ${state.busy || state.guidedPolling || state.guided?.pending || (state.guided && !live) ? 'disabled' : ''}>
@@ -415,6 +444,7 @@ function render(): void {
     `
     wireEvents()
     updateBackupControls()
+    updateHeightDisplay()
     const modal = document.querySelector<HTMLElement>('.live-modal')
     if (modal) {
         modal.classList.toggle('expanded', modalExpanded)
@@ -439,7 +469,7 @@ function liveDialog(): string {
               <div><span>Total miner fees</span><strong>${formatSats(plan.totalFees)} sats</strong></div>
               <div><span>Transactions</span><strong>${plan.transactions.length}</strong></div>
               ${plan.recipient ? `<div class="wide"><span>${plan.action === 'send' ? 'Private recipient · encrypted file handoff required' : 'Public recipient'}</span><strong>${escapeHtml(plan.recipient)}</strong></div>` : ''}
-              ${plan.unlockHeight ? `<div class="wide"><span>Unlock height</span><strong>${formatSats(plan.unlockHeight)}</strong></div>` : ''}
+              ${plan.unlockHeight ? `<div class="wide"><span>Exact unlock height · fixed at preparation</span><strong>${lockHeightLabel(plan.unlockHeight, plan.startHeight)}</strong><small>Checked testnet height: ${formatSats(plan.startHeight)}. The block count is measured from that check, not a time estimate.</small></div>` : ''}
             </div>
             <ol class="tx-review-list">
               ${plan.transactions.map((tx, index) => `<li class="${state.liveBroadcastIndex === index ? 'active' : ''}">
@@ -606,7 +636,7 @@ function displayGuidedRole(): void {
     state.liveAddress = slot.wallet.address
     state.receivingAddress = slot.address
     state.privateBalance = slot.session?.privateBalance() ?? 0
-    state.lockedBalance = slot.session?.lockedBalance(state.currentHeight) ?? 0
+    state.lockedBalance = slot.session?.lockedBalance(heights.height ?? 0) ?? 0
     state.publicBalance = slot.session?.fundingBalance() ?? slot.wallet.funding.satoshis
     state.fundingChecked = state.guidedViews[pair.active].fundingChecked
     state.activities = state.guidedViews[pair.active].activities
@@ -731,7 +761,7 @@ async function unlockBrowserWallet(): Promise<void> {
         if (hasGuidedMarker()) throw new Error('Restore your latest two-wallet backup below. Do not reopen the original funded wallet after creating a guided pair.')
         const { wallet, fundingChecked } = await unlockLiveWallet(password)
         password = ''
-        const height = await testnetHeight()
+        await heights.requireFresh()
         state.receivingWallet = wallet
         state.liveAddress = wallet.address
         state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
@@ -741,7 +771,6 @@ async function unlockBrowserWallet(): Promise<void> {
         state.publicBalance = wallet.funding.satoshis
         state.privateBalance = 0
         state.lockedBalance = 0
-        state.currentHeight = height
         state.activities = []
         if (state.guidedRequested) await enableGuided()
         timers.finish(timing, 'Completed')
@@ -809,7 +838,7 @@ async function walletTask(task: () => Promise<void>, label = 'Wallet operation')
     finally { foregroundTiming = null; syncGuidedSlot(); state.busy = false; state.liveDialogOpen = true; render() }
 }
 async function adoptSession(session: LiveVeilSession): Promise<void> {
-    const height = await testnetHeight()
+    const height = await heights.requireFresh()
     state.liveSession = session
     state.receivingWallet = null
     state.receivingAddress = session.receivingAddress()
@@ -818,8 +847,7 @@ async function adoptSession(session: LiveVeilSession): Promise<void> {
     state.publicBalance = session.fundingBalance()
     state.connected = true
     walletChanged()
-    state.currentHeight = height
-    state.lockedBalance = session.lockedBalance(state.currentHeight)
+    state.lockedBalance = session.lockedBalance(height)
     state.activities = []
 }
 async function saveBackup(password?: string, automatic = false): Promise<void> {
@@ -861,6 +889,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
     timers.phase(foregroundTiming, 'Validate wallet and check mined pool')
     if (payload?.format === GUIDED_FORMAT) {
         const pair = await GuidedDemo.restore(payload, updateProofProgress)
+        await heights.refresh()
         state.guided = pair
         state.restoredSingle = false
         state.guidedViews = {
@@ -882,6 +911,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
     if (!payload.pool) {
         if (payload.notes.length) throw new Error('Backup has notes without a pool')
         const wallet = validateReceivingWallet(payload.wallet)
+        await heights.refresh()
         state.receivingWallet = wallet
         state.liveAddress = wallet.address
         state.receivingAddress = recipientIdentity(wallet.wif, await createHash()).address
@@ -911,7 +941,7 @@ window.addEventListener('beforeunload', event => {
     }
 })
 
-async function prepareLiveAction(amount: number, unlockHeight: number): Promise<boolean> {
+async function prepareLiveAction(amount: number, unlockHeight: string): Promise<boolean> {
     const session = state.liveSession
     if (!session) return false
     actionTiming = timers.start(`${state.action === 'shield' ? 'Add' : state.action} · live testnet`, 'Prepare')
@@ -929,14 +959,14 @@ async function prepareLiveAction(amount: number, unlockHeight: number): Promise<
             amount,
             state.recipient.trim(),
             unlockHeight,
-            updateProofProgress
+            updateProofProgress,
+            () => heights.requireFresh()
         )
         state.pendingLivePlan = plan
         timers.phase(actionTiming, 'User review — not broadcast')
         foregroundTiming = null
         state.liveConfirm = false
         state.liveDialogOpen = false
-        state.currentHeight = plan.startHeight
         state.busy = false
         state.proofProgress = 0
         state.proofProgressLabel = ''
@@ -1021,6 +1051,7 @@ async function broadcastLivePlan(): Promise<void> {
 }
 
 async function submit(): Promise<boolean> {
+    if (state.busy || state.liveUnlocking || state.pendingLivePlan) return false
     if (state.guided?.pending || state.guidedPolling) { showToast('Wait for mining and wallet synchronization'); return false }
     if (state.guided?.active === 'recipient' && !state.liveSession) { showToast('Waiting for a mined payment to the demo recipient'); return false }
     if (state.receivingWallet) { state.liveDialogOpen = true; render(); showToast('Import a payment or prepare a funded pool first'); return false }
@@ -1045,18 +1076,13 @@ async function submit(): Promise<boolean> {
         showToast(state.action === 'send' ? 'Enter a Veil address' : 'Enter a BSV address')
         return false
     }
-    const unlockHeight = Number.parseInt(state.unlockHeight, 10)
-    if (
-        state.action === 'lock' &&
-        (!Number.isSafeInteger(unlockHeight) ||
-            unlockHeight <= state.currentHeight ||
-            unlockHeight >= 500_000_000)
-    ) {
-        showToast(`Choose a block above ${formatSats(state.currentHeight)}`)
-        return false
-    }
+    if (state.liveSession) return prepareLiveAction(amount, state.unlockHeight)
 
-    if (state.liveSession) return prepareLiveAction(amount, unlockHeight)
+    let unlockHeight = 0
+    if (state.action === 'lock') {
+        try { unlockHeight = resolveLockHeight(state.unlockHeight, heights.height ?? 0) }
+        catch (error) { showToast(error instanceof Error ? error.message : 'Height unavailable'); return false }
+    }
 
     const localTiming = timers.start(`${state.action === 'shield' ? 'Add' : state.action} · local proof`, 'Preparing private proof')
     foregroundTiming = localTiming
@@ -1072,7 +1098,7 @@ async function submit(): Promise<boolean> {
             BigInt(state.privateBalance),
             state.recipient,
             state.action === 'lock' ? BigInt(unlockHeight) : 0n,
-            BigInt(state.currentHeight),
+            BigInt(heights.height ?? 0),
             updateProofProgress
         )
     } catch (error) {
@@ -1162,7 +1188,7 @@ async function runDemo(): Promise<void> {
     const steps: Array<{ action: Action; amount: string; recipient?: string; unlockHeight?: string }> = [
         { action: 'shield', amount: '400' },
         { action: 'send', amount: '200', recipient: 'veil1jackdemo' },
-        { action: 'lock', amount: '200', unlockHeight: String(state.currentHeight + 100) },
+        { action: 'lock', amount: '200', unlockHeight: '+100' },
         { action: 'withdraw', amount: '200', recipient: '1JackDemoAddress' },
     ]
 
@@ -1381,16 +1407,10 @@ function wireEvents(): void {
         state.recipient = (event.target as HTMLInputElement).value
     })
     document.querySelector<HTMLInputElement>('#unlock-height')?.addEventListener('input', (event) => {
-        state.unlockHeight = (event.target as HTMLInputElement).value.replace(/\D/g, '')
+        state.unlockHeight = (event.target as HTMLInputElement).value
+        updateHeightDisplay()
     })
-    document.querySelectorAll<HTMLButtonElement>('[data-height]').forEach((button) => {
-        button.addEventListener('click', () => {
-            state.unlockHeight = String(
-                state.currentHeight + Number.parseInt(button.dataset.height ?? '0', 10)
-            )
-            render()
-        })
-    })
+    document.querySelector('#retry-height')?.addEventListener('click', () => void heights.refresh())
     document.querySelector('#submit-action')?.addEventListener('click', () => {
         void submit()
     })
@@ -1435,6 +1455,11 @@ function wireEvents(): void {
 }
 
 render()
+// Start immediately; refresh without rerendering or clearing wallet/password inputs.
+void heights.refresh()
+window.setInterval(() => {
+    if (!state.busy && !state.liveUnlocking && !state.pendingLivePlan && !state.guidedPolling) void heights.refresh()
+}, 60_000)
 // Quotes disclose no wallet identifiers to the provider. Requests use this browser's route.
 void refreshUsd()
 window.setInterval(() => { updateUsdDisplay(); void refreshUsd() }, 5 * 60_000)
