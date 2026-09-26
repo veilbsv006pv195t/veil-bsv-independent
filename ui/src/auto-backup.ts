@@ -1,3 +1,19 @@
+export function backupChoice(selected: boolean, enabled: boolean, busy: boolean) {
+    const checked = selected || enabled
+    return {
+        checked,
+        manualDisabled: busy || checked,
+        consentDisabled: busy || enabled,
+        autoDisabled: busy || !checked,
+        autoLabel: enabled ? 'Update automatic-backup passphrase' : 'Enable automatic backups',
+        hint: enabled
+            ? 'Automatic backups are ON. Use Disable below to return to manual backups. Enter a new passphrase only if you want to change it.'
+            : selected
+                ? 'Automatic selected, but not enabled yet. Enter your backup passphrase, then click Enable automatic backups. Uncheck to use manual download.'
+                : 'Manual mode. Tick the checkbox to select automatic backups, then click Enable automatic backups.',
+    }
+}
+
 // Session-only coordination. A download request is NOT a saved-file receipt.
 export class AutoBackup {
     revision = 0

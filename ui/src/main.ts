@@ -12,9 +12,10 @@ import { canUnlockOriginalWallet, canCreateGuidedRecipient } from './wallet-entr
 import { Stopwatches, elapsed } from './stopwatches'
 import { MAX_BACKUP_FILE_BYTES } from '../../src/backupCompression'
 import { encodeBackupFile, decodeBackupFile } from '../../src/backupFile'
-import { AutoBackup } from './auto-backup'
+import { AutoBackup, backupChoice } from './auto-backup'
 
 const backups = new AutoBackup()
+let autoBackupSelected = false
 let backupDownload: { url: string; name: string; revision: number } | null = null
 function clearBackupDownload(): void {
     if (backupDownload) URL.revokeObjectURL(backupDownload.url)
@@ -34,7 +35,21 @@ function backupControls(): string {
       ${backups.enabled && !backups.busy && !current ? '<button class="secondary-button" data-retry-backup>Retry automatic backup now</button>' : ''}
       <p>No automatic disk-write receipt is available. Confirmation is your acknowledgment; files must be kept outside temporary browser storage.</p>`
 }
+function updateBackupChoice(): void {
+    const choice = backupChoice(autoBackupSelected, backups.enabled, backups.busy || state.busy || state.liveUnlocking)
+    const checkbox = document.querySelector<HTMLInputElement>('#auto-backup-consent')
+    if (checkbox) { checkbox.checked = choice.checked; checkbox.disabled = choice.consentDisabled }
+    const manual = document.querySelector<HTMLButtonElement>('#save-wallet-backup')
+    if (manual) manual.disabled = choice.manualDisabled
+    const enable = document.querySelector<HTMLButtonElement>('#enable-auto-backup')
+    if (enable) { enable.disabled = choice.autoDisabled; enable.textContent = choice.autoLabel }
+    const disable = document.querySelector<HTMLButtonElement>('#disable-auto-backup')
+    if (disable) disable.hidden = !backups.enabled
+    const hint = document.querySelector('#backup-choice-hint')
+    if (hint) hint.textContent = choice.hint
+}
 function updateBackupControls(): void {
+    updateBackupChoice()
     const manual = document.querySelector('#save-wallet-backup')
     if (manual) manual.textContent = `Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}`
     document.querySelectorAll('[data-backup-controls]').forEach(node => {
@@ -463,8 +478,9 @@ function liveDialog(): string {
           <p>New .veil backups are compressed before encryption and stored as compact binary files. Older .json backups can still be restored here; older website builds cannot read the new format. Keep your previous backup until recovery is verified.</p>
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
-          <button class="secondary-button" id="save-wallet-backup">Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}</button>
           <label class="live-confirm"><input type="checkbox" id="auto-backup-consent" /> Keep this backup passphrase in memory for this session and request encrypted downloads automatically after wallet changes. I understand the browser may block downloads and I must check they are saved.</label>
+          <p id="backup-choice-hint" role="status"></p>
+          <button class="secondary-button" id="save-wallet-backup">Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}</button>
           <button class="secondary-button" id="enable-auto-backup" ${backups.busy ? 'disabled' : ''}>Enable automatic backups / change passphrase</button>
           ${backups.enabled ? '<button class="secondary-button" id="disable-auto-backup">Disable automatic backups and forget passphrase</button>' : ''}
           <div data-backup-controls></div>
@@ -747,6 +763,7 @@ function clearLiveWallet(): void {
     if (state.guided?.pending) { state.liveError = 'Wait for mining and wallet synchronization before returning to Restore.'; state.liveDialogOpen = true; render(); return }
     if (state.backupDirty) { state.liveError = 'Download an up-to-date encrypted wallet backup before clearing this tab.'; state.liveDialogOpen = true; render(); return }
     backups.restored()
+    autoBackupSelected = false
     clearBackupDownload()
     state.liveSession = null
     state.guided = null
@@ -857,6 +874,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         if (pair.pending) miningTimings.set(pair.pending.txid, timers.start('Restored pending handoff', 'Mining/handoff wait since restore; earlier duration unknown'))
         state.backupDirty = false
         backups.restored()
+        autoBackupSelected = false
         clearBackupDownload()
         return
     }
@@ -879,6 +897,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
     }
     state.backupDirty = false
     backups.restored()
+    autoBackupSelected = false
     clearBackupDownload()
     // Restoring must reproduce the saved wallet, never generate replacement keys.
     // The shared marker remains intact and still prevents first-time unlock.
@@ -1220,10 +1239,17 @@ function wireEvents(): void {
         void navigator.clipboard?.writeText(state.receivingAddress)
     })
     document.querySelector('#save-wallet-backup')?.addEventListener('click', () => {
+        if (backupChoice(autoBackupSelected, backups.enabled, backups.busy || state.busy || state.liveUnlocking).manualDisabled) return
         const input = document.querySelector<HTMLInputElement>('#backup-password')!
         const password = input.value
         input.value = ''
         void walletTask(() => saveBackup(password), state.guided ? 'Two-wallet backup download' : 'Single-wallet backup download')
+    })
+    document.querySelector<HTMLInputElement>('#auto-backup-consent')?.addEventListener('change', event => {
+        if (backups.enabled) return
+        autoBackupSelected = (event.target as HTMLInputElement).checked
+        // Do not rerender: preserve the masked passphrase and modal scroll position.
+        updateBackupChoice()
     })
     document.querySelector('#enable-auto-backup')?.addEventListener('click', () => {
         if (backups.busy || state.busy || state.liveUnlocking) return
@@ -1241,6 +1267,7 @@ function wireEvents(): void {
     })
     document.querySelector('#disable-auto-backup')?.addEventListener('click', () => {
         backups.disable()
+        autoBackupSelected = false
         // Update only backup UI while another operation may be using inputs.
         updateBackupControls()
         showToast('Automatic backups disabled; session passphrase reference cleared')
@@ -1421,5 +1448,5 @@ window.addEventListener('beforeunload', event => {
         event.returnValue = ''
     }
 })
-window.addEventListener('pagehide', () => { backups.disable(); backups.offeredRevision = -1; clearBackupDownload() })
+window.addEventListener('pagehide', () => { backups.disable(); autoBackupSelected = false; backups.offeredRevision = -1; clearBackupDownload() })
 window.addEventListener('pageshow', updateBackupControls)

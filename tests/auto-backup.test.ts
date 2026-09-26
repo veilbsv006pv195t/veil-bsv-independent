@@ -1,9 +1,24 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AutoBackup } from '../ui/src/auto-backup'
+import { AutoBackup, backupChoice } from '../ui/src/auto-backup'
 import { encryptBackup, decryptBackup } from '../src/walletBackup'
 import { encodeBackupFile, decodeBackupFile } from '../src/backupFile'
 const password = 'synthetic-test-passphrase-only-123'
+test('backup choice makes manual and automatic setup mutually exclusive and keeps active consent checked', () => {
+    const manual = backupChoice(false, false, false)
+    assert.equal(manual.manualDisabled, false); assert.equal(manual.autoDisabled, true)
+    const selected = backupChoice(true, false, false)
+    assert.equal(selected.checked, true); assert.equal(selected.manualDisabled, true); assert.equal(selected.autoDisabled, false)
+    assert.match(selected.hint, /not enabled yet/)
+    const active = backupChoice(false, true, false)
+    assert.equal(active.checked, true); assert.equal(active.consentDisabled, true); assert.equal(active.manualDisabled, true)
+    assert.equal(active.autoLabel, 'Update automatic-backup passphrase')
+    for (const enabled of [false, true]) {
+        const busy = backupChoice(true, enabled, true)
+        assert.equal(busy.manualDisabled, true); assert.equal(busy.autoDisabled, true)
+    }
+    assert.equal(backupChoice(false, false, false).checked, false)
+})
 test('opt-in, download request, explicit receipt and changed wallet are distinct', async () => {
     const b = new AutoBackup()
     b.changed(); assert.equal(b.due, false)
