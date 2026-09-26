@@ -8,7 +8,7 @@ import { recipientIdentity, RECIPIENT_PROTOCOL, type EncryptedPayment } from '..
 import { encryptBackup, decryptBackup, type WalletBackup } from '../../src/walletBackup'
 import { GuidedDemo, GUIDED_FORMAT, GUIDED_MARKER, otherRole, type Role } from './guided-demo'
 import { fetchUsdQuote, mainnetUsd, isFresh, type UsdQuote } from './usd-price'
-import { canUnlockOriginalWallet } from './wallet-entry-guard'
+import { canUnlockOriginalWallet, canCreateGuidedRecipient } from './wallet-entry-guard'
 
 type Action = 'shield' | 'send' | 'lock' | 'withdraw'
 type Theme = 'light' | 'dark'
@@ -57,6 +57,7 @@ function initialTheme(): Theme {
 const state = {
     guided: null as GuidedDemo | null,
     guidedRequested: true,
+    restoredSingle: false,
     guidedMessage: '',
     guidedPolling: false,
     guidedViews: {
@@ -357,7 +358,10 @@ function liveDialog(): string {
           <label class="field-label" for="backup-password">Unique backup passphrase (24+ characters)</label>
           <div class="text-field"><input id="backup-password" type="password" autocomplete="new-password" /></div>
           <button class="secondary-button" id="save-wallet-backup">Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}</button>
-          ${state.guided ? '<p>This one encrypted file includes BOTH keys, private notes and any pending handoff. Keep the newest download; the website password alone does not recover these notes. Restore this file after a reload—do not unlock the original funding envelope again.</p>' : '<button class="secondary-button" id="enable-guided-demo">Set up guided demo recipient</button>'}
+          ${state.guided ? '<p>This one encrypted file includes BOTH keys, private notes and any pending handoff. Keep the newest download; the website password alone does not recover these notes. Restore this file after a reload—do not unlock the original funding envelope again.</p>' : `
+            ${state.restoredSingle ? '<p role="status">Single-wallet backup restored. No recipient keys were created or replaced. Keep the original backup. Do not transact from another tab using this wallet.</p>' : ''}
+            ${hasGuidedMarker() && state.restoredSingle ? '<p>A previous guided-setup marker exists in this browser. It does not identify a wallet or prove a recipient was saved. Restore a combined backup if you have one; creating a new recipient will not recover an earlier recipient.</p><label class="live-confirm"><input id="confirm-new-recipient" type="checkbox" /> I have no existing recipient to recover for this demo and want to create a NEW recipient. I will keep my original backup and save the combined backup.</label>' : ''}
+            <button class="secondary-button" id="enable-guided-demo">Set up guided demo recipient</button>`}
           ${state.guided ? '' : '<label class="field-label" for="payment-file">Import encrypted payment file</label><input id="payment-file" type="file" accept=".json,application/json" />'}
           ${state.liveSession ? `
             <button class="secondary-button" id="save-payment-file" ${state.liveSession.paymentFile() ? '' : 'disabled'}>Download last encrypted payment</button>
@@ -376,7 +380,7 @@ function liveDialog(): string {
         ` : `
           <h3>Returning user — restore your backup</h3>
           <p>Already used Veil? Restore your latest encrypted wallet backup here. Enter its backup passphrase first, then choose the file to restore. Do not select an encrypted payment file.</p>
-          ${hasGuidedMarker() ? '<p role="status">An existing guided setup was detected. First-time unlock is disabled; restore your latest two-wallet backup in this section.</p>' : ''}
+          ${hasGuidedMarker() ? '<p role="status">A previous setup marker exists. First-time unlock is disabled. Restore your latest backup: single-wallet and combined two-wallet backups are both supported. A single-wallet restore does not create or replace a recipient.</p>' : ''}
           <label class="field-label" for="restore-password">Backup passphrase</label>
           <div class="text-field"><input id="restore-password" type="password" autocomplete="current-password" /></div>
           <label class="live-confirm"><input id="guided-demo-choice" type="checkbox" ${state.guidedRequested ? 'checked' : ''} /> Guided demo: create a separate recipient on first setup</label>
@@ -430,9 +434,9 @@ function walletUnlockAllowed(): boolean {
 function hasGuidedMarker(): boolean {
     try { return localStorage.getItem(GUIDED_MARKER) !== null } catch { return false }
 }
-async function enableGuided(): Promise<void> {
+async function enableGuided(confirmedNewRecipient = false): Promise<void> {
     if (state.guided) return
-    if (hasGuidedMarker()) throw new Error('A guided pair was previously created. Restore its latest two-wallet backup; do not replace the recipient.')
+    if (!canCreateGuidedRecipient(hasGuidedMarker(), state.restoredSingle, confirmedNewRecipient)) throw new Error('Restore the combined backup if a recipient already exists. Otherwise restore your single-wallet backup and explicitly confirm creating a new demo recipient.')
     const wallet = state.receivingWallet ?? (state.liveSession?.backupPayload() as { wallet: LiveWallet } | undefined)?.wallet
     if (!wallet) throw new Error('Unlock or restore the sender first')
     const pair = await GuidedDemo.create(wallet, state.liveSession)
@@ -624,6 +628,7 @@ function clearLiveWallet(): void {
     if (state.backupDirty) { state.liveError = 'Download an up-to-date encrypted wallet backup before clearing this tab.'; state.liveDialogOpen = true; render(); return }
     state.liveSession = null
     state.guided = null
+    state.restoredSingle = false
     state.guidedMessage = ''
     state.receivingWallet = null
     state.receivingAddress = ''
@@ -662,6 +667,7 @@ async function walletTask(task: () => Promise<void>): Promise<void> {
     finally { syncGuidedSlot(); state.busy = false; state.liveDialogOpen = true; render() }
 }
 async function adoptSession(session: LiveVeilSession): Promise<void> {
+    const height = await testnetHeight()
     state.liveSession = session
     state.receivingWallet = null
     state.receivingAddress = session.receivingAddress()
@@ -670,7 +676,7 @@ async function adoptSession(session: LiveVeilSession): Promise<void> {
     state.publicBalance = session.fundingBalance()
     state.connected = true
     state.backupDirty = true
-    state.currentHeight = await testnetHeight()
+    state.currentHeight = height
     state.lockedBalance = session.lockedBalance(state.currentHeight)
     state.activities = []
 }
@@ -691,6 +697,7 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
     if (payload?.format === GUIDED_FORMAT) {
         const pair = await GuidedDemo.restore(payload, updateProofProgress)
         state.guided = pair
+        state.restoredSingle = false
         state.guidedViews = {
             sender: { fundingChecked: false, activities: [] },
             recipient: { fundingChecked: false, activities: [] },
@@ -702,7 +709,6 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         state.backupDirty = false
         return
     }
-    if (hasGuidedMarker()) throw new Error('This is a single-wallet backup. Restore the combined two-wallet backup to retain the existing recipient.')
     if (payload?.protocol !== RECIPIENT_PROTOCOL || !Array.isArray(payload.notes)) throw new Error('Unsupported backup payload')
     if (!payload.pool) {
         if (payload.notes.length) throw new Error('Backup has notes without a pool')
@@ -721,7 +727,9 @@ async function restoreWallet(envelope: WalletBackup, password: string): Promise<
         await adoptSession(await LiveVeilSession.restoreBackup(payload, updateProofProgress))
     }
     state.backupDirty = false
-    if (state.guidedRequested) await enableGuided()
+    // Restoring must reproduce the saved wallet, never generate replacement keys.
+    // The shared marker remains intact and still prevents first-time unlock.
+    state.restoredSingle = true
 }
 
 window.addEventListener('beforeunload', event => {
@@ -996,7 +1004,10 @@ function wireEvents(): void {
     document.querySelector<HTMLInputElement>('#guided-demo-choice')?.addEventListener('change', event => {
         state.guidedRequested = (event.target as HTMLInputElement).checked
     })
-    document.querySelector('#enable-guided-demo')?.addEventListener('click', () => void walletTask(enableGuided))
+    document.querySelector('#enable-guided-demo')?.addEventListener('click', () => {
+        const confirmed = document.querySelector<HTMLInputElement>('#confirm-new-recipient')?.checked === true
+        void walletTask(() => enableGuided(confirmed))
+    })
     document.querySelectorAll<HTMLButtonElement>('[data-wallet-role]').forEach(button => button.addEventListener('click', () => selectGuidedRole(button.dataset.walletRole as Role)))
     document.querySelector('#check-guided-handoff')?.addEventListener('click', () => void checkGuidedHandoff())
     document.querySelector('#use-demo-recipient')?.addEventListener('click', () => {

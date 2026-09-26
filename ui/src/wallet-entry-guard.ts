@@ -12,3 +12,8 @@ export function canUnlockOriginalWallet(state: WalletEntryState): boolean {
     return !state.busy && !state.unlocking && !state.hasWallet &&
         !state.pendingPlan && !state.checkingHandoff && !state.restoreRequired
 }
+
+/** A browser-wide marker is not proof that this wallet has a recipient. */
+export function canCreateGuidedRecipient(marker: boolean, restoredSingle: boolean, confirmedNewRecipient: boolean): boolean {
+    return !marker || (restoredSingle && confirmedNewRecipient)
+}
