@@ -4,20 +4,46 @@ import { AutoBackup, backupChoice } from '../ui/src/auto-backup'
 import { encryptBackup, decryptBackup } from '../src/walletBackup'
 import { encodeBackupFile, decodeBackupFile } from '../src/backupFile'
 const password = 'synthetic-test-passphrase-only-123'
-test('backup choice makes manual and automatic setup mutually exclusive and keeps active consent checked', () => {
+test('setup choices are exclusive, but active automatic mode allows an on-demand download', () => {
     const manual = backupChoice(false, false, false)
     assert.equal(manual.manualDisabled, false); assert.equal(manual.autoDisabled, true)
     const selected = backupChoice(true, false, false)
     assert.equal(selected.checked, true); assert.equal(selected.manualDisabled, true); assert.equal(selected.autoDisabled, false)
     assert.match(selected.hint, /not enabled yet/)
     const active = backupChoice(false, true, false)
-    assert.equal(active.checked, true); assert.equal(active.consentDisabled, true); assert.equal(active.manualDisabled, true)
+    assert.equal(active.checked, true); assert.equal(active.consentDisabled, true); assert.equal(active.manualDisabled, false)
+    assert.equal(backupChoice(true, true, false).manualDisabled, false)
     assert.equal(active.autoLabel, 'Update automatic-backup passphrase')
     for (const enabled of [false, true]) {
         const busy = backupChoice(true, enabled, true)
         assert.equal(busy.manualDisabled, true); assert.equal(busy.autoDisabled, true)
     }
     assert.equal(backupChoice(false, false, false).checked, false)
+})
+test('on-demand export retains automatic mode and its passphrase for the next wallet change', async () => {
+    const backups = new AutoBackup()
+    backups.enable(password)
+    const files: Uint8Array[] = []
+    let payload = { format: 'synthetic two-wallet fixture', wallets: ['sender', 'recipient'], revision: 1 }
+    const build = async (secret: string) => {
+        assert.equal(secret, password)
+        return encodeBackupFile(await encryptBackup(payload, secret))
+    }
+    const offer = (file: Uint8Array) => { files.push(file) }
+    await backups.request(build, offer)
+    assert.equal(backups.confirm(), true)
+    await backups.request(build, offer) // Explicit on-demand request; no new password.
+    assert.equal(backups.enabled, true)
+    assert.equal(backups.dirty, false)
+    payload = { ...payload, revision: 2 }
+    backups.changed()
+    assert.equal(backups.due, true)
+    await backups.request(build, offer)
+    assert.equal(backups.enabled, true)
+    assert.equal(backups.dirty, true)
+    assert.equal(backups.canConfirm, true)
+    assert.deepEqual(await decryptBackup(decodeBackupFile(files[2]), password), payload)
+    assert.equal(files.length, 3)
 })
 test('opt-in, download request, explicit receipt and changed wallet are distinct', async () => {
     const b = new AutoBackup()

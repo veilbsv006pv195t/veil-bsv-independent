@@ -2,12 +2,12 @@ export function backupChoice(selected: boolean, enabled: boolean, busy: boolean)
     const checked = selected || enabled
     return {
         checked,
-        manualDisabled: busy || checked,
+        manualDisabled: busy || (selected && !enabled),
         consentDisabled: busy || enabled,
         autoDisabled: busy || !checked,
         autoLabel: enabled ? 'Update automatic-backup passphrase' : 'Enable automatic backups',
         hint: enabled
-            ? 'Automatic backups are ON. Use Disable below to return to manual backups. Enter a new passphrase only if you want to change it.'
+            ? 'Automatic backups are ON. Download backup now uses the current session passphrase and keeps automatic backups on. Enter a new passphrase only to update it with the separate button.'
             : selected
                 ? 'Automatic selected, but not enabled yet. Enter your backup passphrase, then click Enable automatic backups. Uncheck to use manual download.'
                 : 'Manual mode. Tick the checkbox to select automatic backups, then click Enable automatic backups.',

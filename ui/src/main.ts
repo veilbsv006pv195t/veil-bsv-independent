@@ -39,7 +39,7 @@ function backupControls(): string {
       <p>No automatic disk-write receipt is available. Confirmation is your acknowledgment; files must be kept outside temporary browser storage.</p>`
 }
 function updateBackupChoice(): void {
-    const choice = backupChoice(autoBackupSelected, backups.enabled, backups.busy || state.busy || state.liveUnlocking)
+    const choice = backupChoice(autoBackupSelected, backups.enabled, backups.busy || state.busy || state.liveUnlocking || state.guidedPolling || !!state.pendingLivePlan)
     const checkbox = document.querySelector<HTMLInputElement>('#auto-backup-consent')
     if (checkbox) { checkbox.checked = choice.checked; checkbox.disabled = choice.consentDisabled }
     const manual = document.querySelector<HTMLButtonElement>('#save-wallet-backup')
@@ -54,7 +54,7 @@ function updateBackupChoice(): void {
 function updateBackupControls(): void {
     updateBackupChoice()
     const manual = document.querySelector('#save-wallet-backup')
-    if (manual) manual.textContent = `Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${state.backupDirty ? ' · required' : ''}`
+    if (manual) manual.textContent = `Download encrypted ${state.guided ? 'two-wallet' : 'wallet'} backup${backups.enabled ? ' now' : ''}${state.backupDirty ? ' · required' : ''}`
     document.querySelectorAll('[data-backup-controls]').forEach(node => {
         node.innerHTML = backupControls()
         node.querySelector('[data-confirm-backup]')?.addEventListener('click', () => {
@@ -1265,7 +1265,13 @@ function wireEvents(): void {
         void navigator.clipboard?.writeText(state.receivingAddress)
     })
     document.querySelector('#save-wallet-backup')?.addEventListener('click', () => {
-        if (backupChoice(autoBackupSelected, backups.enabled, backups.busy || state.busy || state.liveUnlocking).manualDisabled) return
+        if (backupChoice(autoBackupSelected, backups.enabled, backups.busy || state.busy || state.liveUnlocking || state.guidedPolling || !!state.pendingLivePlan).manualDisabled) return
+        if (backups.enabled) {
+            // On-demand encryption uses the retained session passphrase, never a
+            // half-entered replacement. This does not disable automatic mode.
+            void walletTask(() => saveBackup(), state.guided ? 'On-demand two-wallet backup download' : 'On-demand wallet backup download')
+            return
+        }
         const input = document.querySelector<HTMLInputElement>('#backup-password')!
         const password = input.value
         input.value = ''

@@ -1,5 +1,9 @@
 # v0.3.1 automatic encrypted backups (testnet candidate)
 
+## v0.3.2 follow-up: on-demand export while automatic mode is active
+
+Once automatic mode is enabled, Download encrypted two-wallet backup now creates a current backup using the retained session passphrase without disabling automatic mode. Changing the passphrase remains a separate explicit action. Initial automatic setup still disables the competing manual button until Enable is pressed. Wallet operations and encryption remain mutually exclusive. The existing latest-file download link remains available for a direct user-initiated retry if the browser blocks downloads; an export request never proves a disk save.
+
 Target path: `/veil-bsv-independent/v0.3.1/`. Keep v0.3.0 unchanged.
 This is a UI-only update: no contract, circuit, encryption-format or pool change.
 Existing v0.3.0 single-wallet and combined backups remain readable. Do not operate
